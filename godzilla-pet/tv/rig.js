@@ -266,9 +266,9 @@ const seams=neutral?[]:SEAMS.map(([parent,x,y,rx,ry])=>({...locate(parent,x,y),a
 return{seams,bones:b,muzzle:locate('head',1420,220),claw:locate('forearm',1435,484),foot:locate('shin',1055,1000),tail:locate('tail_tip',70,734),neutral};}
 class Skeleton{
 constructor(){this.images={};this.ready=false;this.failures=[];this.loaded=Promise.all(Object.entries(PARTS).map(([key,p])=>new Promise(resolve=>{let im=new Image();im.onload=()=>resolve();im.onerror=()=>{this.failures.push(key);resolve();};im.src=p.src;this.images[key]=im;}))).then(()=>this.ready=this.failures.length===0);}
-draw(ctx,state,camera=0){const order=['tail_tip','tail_mid','tail_base','far_thigh','far_shin','torso','thigh','shin','upper_arm','forearm','jaw','head'];
+draw(ctx,state,camera=0,drawScale=1){const order=['tail_tip','tail_mid','tail_base','far_thigh','far_shin','torso','thigh','shin','upper_arm','forearm','jaw','head'];
 // Small stepped scale patches sit under moving joints, never above the source artwork.
 for(let patch of state.seams||[]){ctx.save();ctx.translate(patch.x-camera,patch.y);ctx.rotate(patch.a);const {rx,ry}=patch;for(let y=-ry;y<ry;y+=4){for(let x=-rx;x<rx;x+=4){if((x*x)/(rx*rx)+(y*y)/(ry*ry)>1)continue;ctx.fillStyle=((Math.floor(x/4)+Math.floor(y/8))%3===0)?'#303342':'#202331';ctx.fillRect(Math.floor(x/4)*4,Math.floor(y/4)*4,4,4);}}ctx.restore();}
-for(let key of order){let b=state.bones[key],p=PARTS[key],im=this.images[key];if(!im?.complete||!im.naturalWidth)continue;ctx.save();ctx.translate(b.x-camera,b.y);ctx.rotate(b.a);ctx.drawImage(im,-p.pivot[0],-p.pivot[1],p.width*p.scale,p.height*p.scale);ctx.restore();}}}
+for(let key of order){let b=state.bones[key],p=PARTS[key],im=this.images[key];if(!im?.complete||!im.naturalWidth)continue;ctx.save();ctx.translate(b.x-camera,b.y);ctx.rotate(b.a);ctx.drawImage(im,-p.pivot[0]*drawScale,-p.pivot[1]*drawScale,p.width*p.scale*drawScale,p.height*p.scale*drawScale);ctx.restore();}}}
 const api={PARTS,PARENTS,SEAMS,pose,point,bone,curve,Skeleton};if(typeof module!=='undefined')module.exports=api;else root.KaijuRig=api;
 })(typeof window!=='undefined'?window:this);

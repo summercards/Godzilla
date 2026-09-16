@@ -79,6 +79,9 @@ const PANEL_ONLY_CSS = `
   header, footer, #game, .scanlines, .camera-top, .inset,
   .action-caption, .event-banner, .lower-third, .ticker,
   #offline, #notice { display: none !important; }
+  /* 电视左侧那排实体按钮（功能菜单 + 转台）只在直播电视窗口里有意义，
+   * 面板是干净的观测菜单，连同机柜侧栏一起藏掉，避免重复导航。 */
+  .tv-sidebar { display: none !important; }
   /* 画面不再锁 16:9，观测面板铺满整个窗口。
    * 高度必须从 html 一路 100% 下来：#stage 自己的 height:100% 折在
    * 自适应高度的父级上会退回页面公式（100vw*9/16），窗口加高它也不跟。 */
@@ -129,6 +132,23 @@ const PANEL_READABLE_CSS = `
   #growthContent { overflow-x: hidden !important; }
 `;
 
+function panelBounds(main, size, area, gap = 10) {
+  const width = Math.min(size.width, area.width);
+  const height = Math.min(size.height, area.height);
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const right = main.x + main.width + gap;
+  const left = main.x - width - gap;
+  let x, y = clamp(main.y, area.y, area.y + area.height - height);
+  if (right + width <= area.x + area.width) x = right;
+  else if (left >= area.x) x = left;
+  else {
+    x = clamp(main.x, area.x, area.x + area.width - width);
+    if (main.y + main.height + gap + height <= area.y + area.height) y = main.y + main.height + gap;
+    else if (main.y - gap - height >= area.y) y = main.y - gap - height;
+    else y = area.y;
+  }
+  return { x: Math.round(x), y: Math.round(y), width, height };
+}
 const zoomFor = (w) => w / VIEWPORT.w;
 
-module.exports = { VIEWPORT, TV_SIZES, TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, zoomFor };
+module.exports = { VIEWPORT, TV_SIZES, TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, zoomFor, panelBounds };

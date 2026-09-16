@@ -154,6 +154,25 @@ const MUTATIONS = [
   { id: 't_colossal', name: '巨躯化', cat: 'trait', rarity: 'legend', desc: '体型 +12%，全部判定范围同步放大', apply: (d) => { d.morph.extraScale += 0.12; d.morph.colossal = (d.morph.colossal || 0) + 1; } },
   { id: 't_elemental', name: '元素化身', cat: 'trait', rarity: 'legend', desc: '主元素伤害 +40%，体表常驻元素粒子', apply: (d) => { d.morph.elemental = true; d.morph.elementBoost = 0.4; } },
   { id: 't_third_eye', name: '第三只眼', cat: 'trait', rarity: 'epic', desc: '头部新增发光眼，暴击 +10%', apply: (d) => { d.morph.thirdEye = true; d.morph.crit = (d.morph.crit || 0) + 0.1; } },
+
+  /* —— 扩展的部位突变：更多背刺 / 颈盾 / 角 / 尾鳍 / 血瞳 数值组合 —— */
+  { id: 'p_spike3', name: '脊刺晶化', cat: 'part', part: 'spikes', rarity: 'common', desc: '背刺 +3 根，重踏范围 +6%', apply: (d) => { d.morph.spikes += 3; d.morph.stompBoost = (d.morph.stompBoost || 0) + 0.06; } },
+  { id: 'p_spike4', name: '脊刺分叉', cat: 'part', part: 'spikes', rarity: 'fine', desc: '背刺高度 +30%，重踏范围 +10%', apply: (d) => { d.morph.spikeScale = (d.morph.spikeScale || 1) * 1.3; d.morph.stompBoost = (d.morph.stompBoost || 0) + 0.1; } },
+  { id: 'p_frill', name: '颈盾增生', cat: 'part', part: 'torso', rarity: 'rare', desc: '颈盾 +2 块，受击闪光 -15%', apply: (d) => { d.morph.plates += 2; d.morph.hitFlash = Math.max(0, (d.morph.hitFlash ?? 1) - 0.15); } },
+  { id: 'p_horn2', name: '巨角丛生', cat: 'part', part: 'head', rarity: 'rare', desc: '头顶 +2 根角，吐息伤害 +8%', apply: (d) => { d.morph.horns += 2; d.morph.beamBoost = (d.morph.beamBoost || 0) + 0.08; } },
+  { id: 'p_tailfin', name: '尾鳍增生', cat: 'part', part: 'tail_mid', rarity: 'fine', desc: '尾节 +1，尾扫范围 +8%', apply: (d) => { d.morph.tailSegs += 1; d.morph.tailBoost = (d.morph.tailBoost || 0) + 0.08; } },
+  { id: 'p_eye3', name: '血瞳', cat: 'part', part: 'head', rarity: 'fine', desc: '双眼赤红，暴击 +6%', apply: (d) => { d.morph.eyeGlow = true; d.morph.crit = (d.morph.crit || 0) + 0.06; } },
+
+  /* —— 扩展的元素副特效：喂给已有的主元素色与 laser/fire 外观 —— */
+  { id: 'e_magma', name: '鳞片熔纹', cat: 'element', rarity: 'fine', desc: '获得「熔核」副特效', apply: (d) => { addSub(d, 'magma'); } },
+  { id: 'e_venom', name: '鳞片渗毒', cat: 'element', rarity: 'fine', desc: '获得「腐毒」副特效', apply: (d) => { addSub(d, 'venom'); } },
+  { id: 'e_radiant', name: '辐能辉耀', cat: 'element', rarity: 'rare', desc: '体表常驻强辉光，核能 +14%', apply: (d) => { d.morph.aura = true; d.morph.energyBoost = (d.morph.energyBoost || 0) + 0.14; } },
+
+  /* —— 扩展的质变（皮肤 / 激光 / 火焰）：crimson/albino 之外再加玄黑、翠玉、炎狱、冰封 —— */
+  { id: 't_jade', name: '翠化', cat: 'trait', rarity: 'epic', desc: '体色转为翠玉，受击闪光 -25%', apply: (d) => { d.morph.hue = 'jade'; d.morph.hitFlash = Math.max(0, (d.morph.hitFlash ?? 1) - 0.25); } },
+  { id: 't_obsidian', name: '玄化', cat: 'trait', rarity: 'legend', desc: '体色转为玄黑，全伤害 +10%', apply: (d) => { d.morph.hue = 'obsidian'; d.morph.dmgBoost = (d.morph.dmgBoost || 0) + 0.1; } },
+  { id: 't_inferno', name: '炎狱体', cat: 'trait', rarity: 'legend', desc: '体表常驻火焰，吐息 +30% 且附带燃烧', apply: (d) => { d.morph.hue = 'crimson'; addSub(d, 'pyro'); d.morph.aura = true; d.morph.beamBoost = (d.morph.beamBoost || 0) + 0.3; } },
+  { id: 't_glacial', name: '冰封体', cat: 'trait', rarity: 'legend', desc: '体表常驻寒霜，获得「冰棘」且吐息 +20%', apply: (d) => { addSub(d, 'cryo'); d.morph.hue = 'jade'; d.morph.beamBoost = (d.morph.beamBoost || 0) + 0.2; } },
 ];
 
 const MUTATION_BY_ID = Object.fromEntries(MUTATIONS.map((m) => [m.id, m]));
@@ -252,6 +271,19 @@ const xpPerDistrict = (d) => Math.round(60 * Ke(d));
 /* ------------------------------------------------------------------ *
  * 体征期：每 25 级一个质变台阶，不单独存储，由 level 推导
  * ------------------------------------------------------------------ */
+const STAGES = [
+  { key: 'village', name: '现代村庄', minMeters: 0, minLevel: 1, camera: 1.30, enemyTier: 0 },
+  { key: 'suburb', name: '城郊防线', minMeters: 2600, minLevel: 8, camera: 1.16, enemyTier: 1 },
+  { key: 'city', name: '城区核心', minMeters: 7200, minLevel: 18, camera: 1.00, enemyTier: 2 },
+];
+function stageIndexFor(data) {
+  const meters = Number(data?.meters) || 0;
+  const level = Number(data?.level) || 1;
+  let i = 0;
+  for (let n = 0; n < STAGES.length; n++) if (meters >= STAGES[n].minMeters && level >= STAGES[n].minLevel) i = n;
+  return i;
+}
+
 const EPOCHS = [
   { name: '幼兽', min: 1, scale: [1.00, 1.15], color: '#2f4d3a', spikes: 3 },
   { name: '亚成体', min: 25, scale: [1.16, 1.32], color: '#38573f', spikes: 5, fork: true },
@@ -296,7 +328,7 @@ const defaults = () => ({
   district: 1, cleared: 0, kills: 0, meters: 0,
   levels: { power: 1, atomic: 1, metabolism: 1, stride: 1 },
   skills: [],
-  auto: true, policy: 'balanced', muted: true,
+  auto: false, policy: 'balanced', muted: true,
   lastSeen: Date.now(), world: null,
   // —— 本次新增 ——
   talent: 0,               // 天赋点余额
@@ -334,7 +366,7 @@ function sanitize(raw) {
   for (const k in STATS) a.levels[k] = Math.floor(finite(raw.levels && raw.levels[k], 1, 1, 500));
 
   a.skills = SKILLS.filter((s) => Array.isArray(raw.skills) && raw.skills.includes(s.id)).map((s) => s.id);
-  a.auto = raw.auto !== false;
+  a.auto = raw.auto === true;
   a.policy = ['balanced', 'kinetic', 'atomic', 'evolution'].includes(raw.policy) ? raw.policy : 'balanced';
   a.muted = raw.muted !== false;
   a.lastSeen = finite(raw.lastSeen, Date.now(), 0, Date.now());
@@ -608,7 +640,7 @@ const api = {
   Economy, STATS, SKILLS, defaults, sanitize,
   TALENT_RINGS, TALENT_NODES, TALENT_BY_ID, RING_GATE,
   MUTATIONS, MUTATION_BY_ID, RARITY, RARITY_BY_KEY, FACE_WEIGHTS, CATEGORY_SHARE,
-  EPOCHS, epochIndexFor, globalScaleFor,
+  EPOCHS, STAGES, stageIndexFor, epochIndexFor, globalScaleFor,
   hashSeed, mulberry32, mutateFor, rarityTableFor,
   Ke, Kb, xpPerEnemy, xpPerBuilding, xpPerDistrict,
 };

@@ -119,21 +119,35 @@ window.__tvSaveBridge = {
  * 不止一个出口：`× 返回直播` 关得掉，Esc 也关得掉。盯属性是唯一能覆盖
  * 全部出口的做法，将来加了新出口也不用改这里。
  * ------------------------------------------------------------------ */
-let panelWatched = false;
+window.__tvHost = {
+  openPanel(key) {
+    window.__growth?.save();
+    flushSync();
+    ipcRenderer.send('tv:openPanel', key);
+  },
+};
+// 捕获阶段阻止旧 onclick，键盘激活也经过同一入口。
+document.addEventListener('click', (e) => {
+  const el = e.target.closest?.('[id^="open-"]');
+  if (!el || !['assign', 'talent', 'evo', 'stats', 'skills', 'news', 'settings'].includes(el.id.slice(5))) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  window.__tvHost.openPanel(el.id.slice(5));
+}, true);
 
-function watchPanel() {
+ipcRenderer.on('tv:command', (_e, payload) => {
+  const result = window.__growth?.command(payload);
+  flushSync();
+  if (result) ipcRenderer.send('tv:rolled', result);
+});
+ipcRenderer.on('tv:snapshot', () => { window.__growth?.save(); flushSync(); });
+
+function guardMainPanel() {
   const mgmt = document.getElementById('management');
-  if (!mgmt || panelWatched) return;
-  panelWatched = true;
-
-  let last = mgmt.hidden;
-  new MutationObserver(() => {
-    if (mgmt.hidden === last) return;
-    last = mgmt.hidden;
-    try { ipcRenderer.send('tv:panel', { open: !mgmt.hidden }); } catch { /* 桥断了就算了 */ }
-  }).observe(mgmt, { attributes: true, attributeFilter: ['hidden'] });
+  if (!mgmt) return;
+  mgmt.hidden = true;
+  new MutationObserver(() => { if (!mgmt.hidden) mgmt.hidden = true; })
+    .observe(mgmt, { attributes: true, attributeFilter: ['hidden'] });
 }
-
-// game.js 是同步脚本，DOMContentLoaded 时 #management 一定已经在文档里了
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchPanel);
-else watchPanel();
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', guardMainPanel);
+else guardMainPanel();

@@ -10,6 +10,31 @@ const assert = require('node:assert/strict');
 
 const P = require('../tv/progression.js');
 
+test('阶段：现代村庄、城郊、城区必须同时满足行程和等级', () => {
+  assert.equal(P.stageIndexFor({ level: 1, meters: 0 }), 0);
+  assert.equal(P.stageIndexFor({ level: 99, meters: 2599 }), 0);
+  assert.equal(P.stageIndexFor({ level: 7, meters: 9000 }), 0);
+  assert.equal(P.stageIndexFor({ level: 8, meters: 2600 }), 1);
+  assert.equal(P.stageIndexFor({ level: 99, meters: 7199 }), 1);
+  assert.equal(P.stageIndexFor({ level: 17, meters: 7200 }), 1);
+  assert.equal(P.stageIndexFor({ level: 18, meters: 7200 }), 2);
+});
+
+test('阶段存档：升级和离线结算不能重置累计里程或已进入阶段', () => {
+  const e = new P.Economy({ version: 4, level: 18, meters: 7300, world: { stage: 'city', district: 9, x: 950 } });
+  e.gain(0, e.nextXP());
+  assert.equal(e.data.meters, 7300);
+  assert.equal(e.data.level, 19);
+  e.data.lastSeen = Date.now() - 12 * 3600000;
+  e.offline(Date.now());
+  assert.equal(e.data.meters, 7300);
+  const back = new P.Economy(JSON.parse(e.serialize(Date.now())));
+  assert.equal(back.data.meters, 7300);
+  assert.equal(back.data.world.stage, 'city');
+  assert.equal(back.data.world.x, 950);
+  assert.equal(P.stageIndexFor(back.data), 2);
+});
+
 /* 确定性：同一个 seed + level 永远抽出同一个突变 */
 test('突变：同一个 seed+level 永远得到同一个结果', () => {
   const a = P.mutateFor(12345, 42);

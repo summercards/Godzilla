@@ -17,7 +17,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, dialog, nativeIm
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, zoomFor } = require('./tv-config.js');
+const { TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, zoomFor, panelBounds } = require('./tv-config.js');
 const { createStore } = require('./save-store.js');
 
 const ASSETS = path.join(__dirname, 'assets');
@@ -48,22 +48,6 @@ const ORIGINAL_GAME = path.join(__dirname, 'tv', 'index.html');
  * 这个 preload 把画面用的那个 localStorage 键接到 <userData>/save/tv.json。
  * 必须配 contextIsolation: false，原因见该文件顶部的说明。 */
 const TV_PRELOAD = path.join(__dirname, 'tv-preload.js');
-
-/* ------------------------------------------------------------------ *
- * 控制按钮（窗口外的那个像素方块）
- *
- * 为什么必须是独立窗口 ——
- *   画面的视口是 1120px，而窗户只有 500 出头，缩放系数 0.46。
- *   画面里任何 UI 都会被这个系数砍掉一半多：12px 的字落到屏幕上只有 5.6px，
- *   既看不清也点不准。想让它保持在 64px，就必须待在缩放之外，也就是另一个窗口。
- *
- * 它贴在电视窗口外侧，跟着窗口走（见 placeDock）。
- * ------------------------------------------------------------------ */
-const DOCK_W = 96;                  // 按钮 88 + 8px 硬阴影在右下
-const DOCK_H = 96;
-const DOCK_GAP = 10;                // 与电视窗口之间留的空隙
-const DOCK_PRELOAD = path.join(__dirname, 'dock-preload.js');
-const DOCK_HTML = path.join(__dirname, 'dock.html');
 
 /* ------------------------------------------------------------------ *
  * 观测面板窗口
@@ -272,75 +256,17 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // 控制按钮要一直贴着窗口，窗口一动就得重新摆
-  w.on('moved', placeDock);
-  w.on('resize', placeDock);
-  // 面板窗口开着的时候同理
+  // 面板窗口开着时跟随主电视位置。
   w.on('moved', placePanel);
   w.on('resize', placePanel);
 }
-
-/* ------------------------------------------------------------------ *
- * 控制按钮：创建、跟随、点开
- * ------------------------------------------------------------------ */
-let dock = null;
 
 /* 面板窗口。它是个真正的独立窗口，和电视窗口并存；
  * 非 null 就代表面板正开着。 */
 let panelWin = null;
 
-function createDock() {
-  dock = new BrowserWindow({
-    width: DOCK_W,
-    height: DOCK_H,
-    frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    hasShadow: false,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    webPreferences: {
-      preload: DOCK_PRELOAD,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  dock.loadFile(DOCK_HTML);
-  dock.setAlwaysOnTop(true, 'screen-saver');
-  dock.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  dock.on('closed', () => { dock = null; });
-  placeDock();
-  // 窗口本来就是藏着的（上次退出时收起了），按钮也一起藏着，
-  // 否则桌面上会只剩一个没主的按钮
-  if (state.hidden) dock.hide();
-}
-
-/* 把按钮摆到电视窗口外侧。
- *
- * 优先左侧 —— 电视默认落在主屏右下角，左边一定有地方。
- * 左边顶到屏幕边缘就翻到右侧；两边都挤不下（窗口宽得快占满屏幕）时
- * 退到窗口内部左下角：宁可压住一点画面，也不能让按钮跑到屏幕外点不到。 */
-function placeDock() {
-  if (!dock || dock.isDestroyed() || !win || win.isDestroyed() || !win.isVisible()) return;
-
-  const b = win.getBounds();
-  const area = screen.getDisplayMatching(b).workArea;
-
-  const y = Math.min(Math.max(b.y + b.height - DOCK_H, area.y), area.y + area.height - DOCK_H);
-  let x = b.x - DOCK_W - DOCK_GAP;
-
-  if (x < area.x) {
-    const right = b.x + b.width + DOCK_GAP;
-    x = right + DOCK_W <= area.x + area.width ? right : b.x + DOCK_GAP;
-  }
-
-  dock.setBounds({ x: Math.round(x), y: Math.round(y), width: DOCK_W, height: DOCK_H });
-}
+let panelKey = 'assign';
+const PANEL_KEYS = new Set(['assign', 'talent', 'evo', 'stats', 'skills', 'news', 'settings']);
 
 /* 把面板窗口摆在电视窗口旁边，跟它成对。
  *
@@ -353,24 +279,7 @@ function placePanel() {
   const p = panelWin.getBounds();
   const area = screen.getDisplayMatching(b).workArea;
 
-  const y = Math.min(Math.max(b.y, area.y), Math.max(area.y, area.y + area.height - p.height));
-
-  /* 控制按钮可能贴在电视右侧（电视靠左时 placeDock 会翻到右侧）。
-   * 不让出这段距离，按钮就会压在面板上 —— 用户截图里右上角那个
-   * 叠在面板上的方块就是这次撞位。 */
-  let anchor = b.x + b.width;
-  if (dock && !dock.isDestroyed() && dock.isVisible()) {
-    const d = dock.getBounds();
-    if (d.x >= b.x + b.width) anchor = Math.max(anchor, d.x + d.width);
-  }
-
-  const right = anchor + DOCK_GAP;
-  let x;
-  if (right + p.width <= area.x + area.width) x = right;
-  else if (b.x - DOCK_GAP - p.width >= area.x) x = b.x - DOCK_GAP - p.width;
-  else x = Math.round(area.x + (area.width - p.width) / 2);
-
-  panelWin.setBounds({ x: Math.round(x), y: Math.round(y), width: p.width, height: p.height });
+  panelWin.setBounds(panelBounds(b, p, area));
 }
 
 /* 打开观测面板。
@@ -382,9 +291,14 @@ function placePanel() {
  * 面板窗口加载的是同一份 tv 页面、同一份 game.js，所以四个页面连同交互
  * 是它自己画好的，一行都没重写。它唯一被限制的是不准写存档
  * （见 panel-preload.js），落盘由电视窗口独占，否则两个实例会互相覆盖。 */
-function openPanel() {
-  if (!win || win.isDestroyed()) return;
-  if (panelWin && !panelWin.isDestroyed()) { panelWin.show(); panelWin.focus(); return; }
+function openPanel(key = 'assign') {
+  if (!win || win.isDestroyed() || !PANEL_KEYS.has(key)) return;
+  panelKey = key;
+  win.webContents.send('tv:snapshot');
+  if (panelWin && !panelWin.isDestroyed()) {
+    panelWin.webContents.send('panel:select', key);
+    placePanel(); panelWin.show(); panelWin.focus(); return;
+  }
 
   // 尺寸跟电视窗口的当前档位走 —— 两个窗口要成套，
   // 一大一小摆在一起很突兀（用户原话："这个面板很大"）。
@@ -406,6 +320,9 @@ function openPanel() {
     show: false,
     webPreferences: {
       preload: PANEL_PRELOAD,
+      // Chromium shares origin zoom within a session. Keep the read-only panel
+      // in an ephemeral session so its 1:1 zoom cannot resize the TV viewport.
+      partition: 'kaiju-panel',
       // 同 tv-preload：存档接管要改页面那一份 Storage.prototype
       contextIsolation: false,
       nodeIntegration: false,
@@ -479,7 +396,7 @@ function applySize(key) {
   win.webContents.setZoomFactor(zoomFor(s.w));
   saveState();
   refreshTray();
-  placeDock();
+  placePanel();
 }
 
 function toggleVisible(force) {
@@ -491,12 +408,6 @@ function toggleVisible(force) {
   if (state.hidden) win.hide();
   else win.showInactive(); // showInactive：显示但不抢焦点
 
-  // 按钮跟着一起收放，否则窗口收起来了按钮还孤零零留在桌面上
-  if (dock && !dock.isDestroyed()) {
-    if (state.hidden) dock.hide();
-    else { placeDock(); dock.showInactive(); }
-  }
-
   saveState();
   refreshTray();
 }
@@ -507,7 +418,7 @@ function resetPosition() {
   win.setPosition(p.x, p.y);
   state.pos = p;
   saveState();
-  placeDock();
+  placePanel();
 }
 
 /* 托盘与右键菜单共用同一份模板 */
@@ -737,7 +648,9 @@ function registerSaveIPC() {
 /* 控制按钮与面板窗口之间的三条通道。
  * 按钮只喊一声"开"；面板那边负责报"用户点了什么"和"我关了"。 */
 function registerDockIPC() {
-  ipcMain.on('dock:toggle', () => togglePanel());
+  ipcMain.on('tv:openPanel', (e, key) => {
+    if (e.sender === win?.webContents) openPanel(key);
+  });
 
   /* 面板启动时要一份存档 —— 给文件里那一份。
    * 面板自己不准写盘，只读这一份（见 panel-preload.js）。 */
@@ -746,6 +659,7 @@ function registerDockIPC() {
     e.returnValue = {
       payload: r.data && typeof r.data.payload === 'string' ? r.data.payload : null,
       source: r.source,
+      key: panelKey,
     };
   });
 
@@ -758,34 +672,14 @@ function registerDockIPC() {
    * 掷骰是特例：电视窗口执行 rollEvolution 后，把结果挂到 el.__panelResult 上，
    * 这里接出返回值、若是对象就回推给面板播动画（面板的骰子只是落在已知的面上，
    * 动画不参与计算）。 */
-  ipcMain.on('panel:tap', (_e, payload) => {
-    if (!win || win.isDestroyed()) return;
-
-    const id = payload && typeof payload.id === 'string' ? payload.id : '';
-    // id 要拼进 JS 里执行，先挡一道；面板里的 id 都是常规标识符
-    if (!/^[A-Za-z][\w-]*$/.test(id)) return;
-
-    const isChange = payload.kind === 'change';
-    let body = 'el.click();';
-    if (isChange) {
-      if (typeof payload.checked === 'boolean') body = `el.checked = ${payload.checked};`;
-      else if (typeof payload.value === 'string') body = `el.value = ${JSON.stringify(payload.value)};`;
-      body += "el.dispatchEvent(new Event('change', { bubbles: true }));";
-    }
-
-    win.webContents
-      .executeJavaScript(
-        `(() => { const el = document.getElementById(${JSON.stringify(id)}); if (!el) return false; ${body} return el.__panelResult || true; })()`,
-      )
-      .then((r) => {
-        if (r && typeof r === 'object' && panelWin && !panelWin.isDestroyed()) {
-          panelWin.webContents.send('panel:rolled', r);
-        }
-      })
-      .catch(() => { /* 电视窗口还没就绪，这一下就算了 */ });
+  ipcMain.on('panel:tap', (e, payload) => {
+    if (e.sender !== panelWin?.webContents || !win || win.isDestroyed()) return;
+    win.webContents.send('tv:command', payload);
   });
-
-  ipcMain.on('panel:done', () => closePanel());
+  ipcMain.on('tv:rolled', (e, result) => {
+    if (e.sender === win?.webContents && panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('panel:rolled', result);
+  });
+  ipcMain.on('panel:done', (e) => { if (e.sender === panelWin?.webContents) closePanel(); });
 }
 
 /* 面板的一致性同步：电视窗口每次落盘后，把 payload 推给面板。
@@ -819,7 +713,7 @@ if (!app.requestSingleInstanceLock()) {
     registerSaveIPC();
     registerDockIPC();
     createWindow();
-    createDock();
+    // 旧 dock 已移除，功能入口只通过主电视捕获后打开独立副屏。
     createTray();
   });
 

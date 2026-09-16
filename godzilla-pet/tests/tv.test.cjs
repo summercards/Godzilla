@@ -13,6 +13,34 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const { VIEWPORT, TV_SIZES, TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, zoomFor } = require('../tv-config.js');
 
+test('副屏定位：优先右侧、左侧回退、上下回退且始终在工作区', () => {
+  const { panelBounds } = require('../tv-config.js');
+  const area = { x: 0, y: 0, width: 1440, height: 900 };
+  const size = { width: 520, height: 496 };
+  assert.equal(panelBounds({ x: 100, y: 100, width: 520, height: 342 }, size, area).x, 630);
+  assert.equal(panelBounds({ x: 880, y: 530, width: 520, height: 342 }, size, area).x, 350);
+  const vertical = panelBounds({ x: 0, y: 0, width: 600, height: 294 }, size, { x: 0, y: 0, width: 800, height: 900 });
+  assert.equal(vertical.y, 304);
+  for (const a of [area, { x: -1280, y: 80, width: 1280, height: 700 }, { x: 0, y: 0, width: 420, height: 300 }]) {
+    const b = panelBounds({ x: a.x, y: a.y, width: 520, height: 342 }, size, a);
+    assert.ok(b.x >= a.x && b.y >= a.y);
+    assert.ok(b.x + b.width <= a.x + a.width && b.y + b.height <= a.y + a.height);
+  }
+});
+
+test('主屏契约：捕获入口、永不显示 management、没有 dock 自动创建', () => {
+  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const hook = fs.readFileSync(path.join(ROOT, 'tv-preload.js'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'tv/style.css'), 'utf8');
+  assert.ok(!main.includes('createDock('));
+  assert.ok(!main.includes("'dock:toggle'"));
+  assert.match(hook, /stopImmediatePropagation/);
+  assert.match(hook, /tv:openPanel/);
+  assert.match(css, /html:not\(\.panel-view\) #management\{display:none!important\}/);
+  assert.match(readGame(), /if\(panelMode\)return/);
+  assert.ok(!readGame().includes('P.IdleProgression.sanitize'));
+});
+
 /* 原版页面的固定像素尺寸，改原版就得跟着改这里 */
 const HEADER_H = 46;
 const FOOTER_H = 38;
