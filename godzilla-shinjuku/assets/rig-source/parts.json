@@ -1,0 +1,242 @@
+{
+  "jaw": {
+    "src": "assets/rig-source/jaw.png",
+    "width": 134,
+    "height": 114,
+    "pivot": [
+      8.8,
+      9.200000000000001
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      1292,
+      199
+    ],
+    "atlasBounds": [
+      1270,
+      176,
+      134,
+      114
+    ]
+  },
+  "head": {
+    "src": "assets/rig-source/head.png",
+    "width": 391,
+    "height": 289,
+    "pivot": [
+      34.0,
+      74.8
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      1180,
+      210
+    ],
+    "atlasBounds": [
+      1095,
+      23,
+      391,
+      289
+    ]
+  },
+  "forearm": {
+    "src": "assets/rig-source/forearm.png",
+    "width": 312,
+    "height": 182,
+    "pivot": [
+      16.400000000000002,
+      32.800000000000004
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      1257,
+      472
+    ],
+    "atlasBounds": [
+      1216,
+      390,
+      312,
+      182
+    ]
+  },
+  "upper_arm": {
+    "src": "assets/rig-source/upper_arm.png",
+    "width": 213,
+    "height": 210,
+    "pivot": [
+      17.2,
+      21.6
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      1143,
+      370
+    ],
+    "atlasBounds": [
+      1100,
+      316,
+      213,
+      210
+    ]
+  },
+  "shin": {
+    "src": "assets/rig-source/shin.png",
+    "width": 392,
+    "height": 188,
+    "pivot": [
+      103.60000000000001,
+      18.0
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      1061,
+      881
+    ],
+    "atlasBounds": [
+      802,
+      836,
+      392,
+      188
+    ]
+  },
+  "thigh": {
+    "src": "assets/rig-source/thigh.png",
+    "width": 389,
+    "height": 364,
+    "pivot": [
+      72.4,
+      50.800000000000004
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      988,
+      673
+    ],
+    "atlasBounds": [
+      807,
+      546,
+      389,
+      364
+    ]
+  },
+  "far_shin": {
+    "src": "assets/rig-source/far_shin.png",
+    "width": 261,
+    "height": 217,
+    "pivot": [
+      50.800000000000004,
+      24.400000000000002
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      1309,
+      853
+    ],
+    "atlasBounds": [
+      1182,
+      792,
+      261,
+      217
+    ]
+  },
+  "far_thigh": {
+    "src": "assets/rig-source/far_thigh.png",
+    "width": 298,
+    "height": 285,
+    "pivot": [
+      33.2,
+      33.6
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      1244,
+      687
+    ],
+    "atlasBounds": [
+      1161,
+      603,
+      298,
+      285
+    ]
+  },
+  "tail_tip": {
+    "src": "assets/rig-source/tail_tip.png",
+    "width": 346,
+    "height": 350,
+    "pivot": [
+      128.8,
+      56.800000000000004
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      322,
+      656
+    ],
+    "atlasBounds": [
+      0,
+      514,
+      346,
+      350
+    ]
+  },
+  "tail_mid": {
+    "src": "assets/rig-source/tail_mid.png",
+    "width": 307,
+    "height": 337,
+    "pivot": [
+      104.0,
+      78.80000000000001
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      605,
+      730
+    ],
+    "atlasBounds": [
+      345,
+      533,
+      307,
+      337
+    ]
+  },
+  "tail_base": {
+    "src": "assets/rig-source/tail_base.png",
+    "width": 409,
+    "height": 385,
+    "pivot": [
+      127.2,
+      93.60000000000001
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      817,
+      802
+    ],
+    "atlasBounds": [
+      499,
+      568,
+      409,
+      385
+    ]
+  },
+  "torso": {
+    "src": "assets/rig-source/torso.png",
+    "width": 1445,
+    "height": 979,
+    "pivot": [
+      362.8,
+      260.8
+    ],
+    "scale": 0.4,
+    "sourcePivot": [
+      988,
+      673
+    ],
+    "atlasBounds": [
+      81,
+      21,
+      1445,
+      979
+    ]
+  }
+}
