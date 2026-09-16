@@ -1,8 +1,8 @@
 {
   "name": "godzilla-pet",
   "productName": "巨兽都市桌宠",
-  "version": "1.0.0",
-  "description": "巨兽都市桌面宠物：会自己拆楼的哥斯拉，随等级慢慢长大。",
+  "version": "2.6.0",
+  "description": "巨兽都市桌面宠物：一个小电视，里面播哥斯拉自动拆城，进度存在文件里。",
   "main": "main.js",
   "private": true,
   "author": "summercards",
@@ -10,8 +10,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test \"tests/*.test.cjs\"",
-    "icons": "python3 build/make-icons.py",
-    "bounds": "python3 build/make-part-bounds.py"
+    "icons": "python3 build/make-icons.py"
   },
   "devDependencies": {
     "electron": "^44.4.1"

@@ -45,7 +45,7 @@ const PAD = '#' + (argv.pad || 'ff00ff');
 const OUT = argv.out || '/tmp/tv-shot.png';
 const PAGE = argv.url
   ? path.resolve(argv.url)
-  : path.join(__dirname, '..', '..', 'godzilla-shinjuku', 'index.html');
+  : path.join(__dirname, '..', 'tv', 'index.html');
 
 /* 用独立的临时 userData，保证每次跑都是干净存档，截图结果可复现 */
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'tv-shot-')));

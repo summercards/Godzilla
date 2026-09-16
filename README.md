@@ -1,60 +1,81 @@
-# 巨兽都市 · GNN 挂机直播版
+# 巨兽都市
 
-打开即开始的自动破坏游戏。哥斯拉自行推进、选择目标和释放技能；不需要移动或战斗操作，也没有玩家血条、死亡或复活流程。
+一个常驻桌面的哥斯拉。它自己拆楼、自己进化、自己长大，从只能拍碎平房的幼体
+慢慢长成能一脚踩平高楼的完全体。全程不需要你操作，进度存在文件里，
+关掉再打开接着算。
 
-完整 16:9 像素画幅，中英文字体、美术、界面与逻辑全部内嵌，可离线运行。
+```
+Godzilla/
+├── godzilla-pet/        唯一主线：Electron 桌宠（应用本体）
+│   ├── tv/              它播放的画面：一份完整的挂机直播游戏，独立可跑
+│   ├── dist/            发布产物：离线单文件版、生成的 .app
+│   └── ...
+├── archive/             历史文件，仅作保留
+└── README.md            你正在看的这份
+```
+
+以前这里有两条并列的产品线：一个网页版，一个桌宠。现在只有一条 ——
+桌宠是应用，网页版降级成它播放的画面（`godzilla-pet/tv/`）。桌宠用 `loadFile`
+直接打开它，不复制、不改写，所以电视里看到的画面与它单独跑时分毫不差。
 
 ## 快速开始
 
-| 方式 | 操作 |
+| 目标 | 怎么做 |
 | --- | --- |
-| 免安装游玩 | 双击根目录的 `巨兽都市-挂机直播.html` |
-| 源码运行 | `cd godzilla-shinjuku && python3 -m http.server 8765`，浏览器访问 `http://localhost:8765` |
-| 逻辑自检 | `cd godzilla-shinjuku && node tests/idle.cjs`（加 `--long` 跑长期模拟） |
+| 玩桌宠 | `cd godzilla-pet && npm install && sh build/make-app.sh` → 双击 `~/Applications/巨兽都市桌宠.app` |
+| 只跑电视画面 | 双击 `godzilla-pet/dist/巨兽都市-挂机直播.html`（离线单文件，不需要服务器） |
+| 改电视画面的源码 | `cd godzilla-pet/tv && python3 -m http.server 8765` |
+| 自检 | `cd godzilla-pet && npm test`（31 项，另有 8 项仅 macOS）· `node tv/tests/idle.cjs`（8 项） |
 
-游戏自动运行。现场声音默认关闭，点击「设置」→「开启现场声音」启用；浏览器要求音频由用户点击启动。
+`npm start` 是在终端前台跑一个，**终端一关它就没了**，只适合调试。
+日常用走 `make-app.sh` 装成真正的应用。
 
-## 玩法概要
+## 存档
 
-- 哥斯拉按距离、敌军与技能冷却自动决策，近战优先于原子吐息。
-- 被动代谢持续产出核能，拆楼与击破军队额外获得核能与进化经验。
-- 四项数值强化：巨兽力量、原子炉心、核能代谢、巨躯动能。
-- 三条分支九个节点的技能树，默认开启自动进化（均衡 / 力量 / 吐息 / 收益四种偏好）。
-- 五个城市主题循环，区域编号持续增长，敌方耐久与压制逐步提高。
-- 每 5 秒自动保存；离线收益最多结算 8 小时。
+**进度存在一个文件里**：`<userData>/save/tv.json`，
+macOS 下是 `~/Library/Application Support/巨兽都市桌宠/save/tv.json`。
 
-## 目录结构
+- 每 5 秒自动落盘，关窗那一刻再同步补一次；崩溃或强杀最多丢 5 秒。
+- 写入是原子的（临时文件 → fsync → 改名），主档坏了自动回退上一版备份，
+  永远不会读到半个 JSON。
+- 托盘菜单 →「存档」可以打开文件夹、导出备份、从备份导入、重置。
 
-```
-godzilla-shinjuku/
-├── index.html          新闻直播界面与成长面板
-├── style.css           像素界面样式
-├── game.js             自动决策、战斗、场景、物理表演、存档接入
-├── progression.js      资源、成长、技能树、离线结算（可 require，便于测试）
-├── rig.js              骨骼层级、关节位置、关键帧与世界坐标计算
-├── assets/
-│   ├── rig-source/     从原始角色拆出的 12 个透明部件 PNG 与资源元数据
-│   ├── rig/            早期部件方案，游戏不加载，仅作历史记录
-│   ├── fonts/          Fusion Pixel 点阵字库及 OFL 许可证
-│   └── godzilla-pixel.png  批准的完整像素角色原图
-└── tests/idle.cjs      零依赖逻辑自检
-```
+画面自己只认 localStorage，这份文件的读写是从外面**劫持**过来的 ——
+`tv/` 里一个字节都没改。做法和它踩过的坑见
+[`godzilla-pet/README.md`](godzilla-pet/README.md)。
 
-补充文档：
+## 文档
 
-- [`godzilla-shinjuku/README.md`](godzilla-shinjuku/README.md) — 完整功能说明、技能树与敌军表
-- [`godzilla-shinjuku/DESIGN.md`](godzilla-shinjuku/DESIGN.md) — 数值公式、自动决策与破坏状态机
-- [`godzilla-shinjuku/ART-DIRECTION.md`](godzilla-shinjuku/ART-DIRECTION.md) — 原图拆件、造型还原与动画实现
-- [`godzilla-shinjuku/CHANGELOG.md`](godzilla-shinjuku/CHANGELOG.md) — 各版本改动与验证记录
+- [`godzilla-pet/README.md`](godzilla-pet/README.md) — 桌宠主文档：存档接管机制、
+  开发命令、目录、踩过的两个坑
+- [`godzilla-pet/CHANGELOG.md`](godzilla-pet/CHANGELOG.md) — 本次改版与验证记录
+- [`godzilla-pet/tv/README.md`](godzilla-pet/tv/README.md) — 电视画面的玩法、
+  技能树与敌军表
+- [`godzilla-pet/tv/DESIGN.md`](godzilla-pet/tv/DESIGN.md) — 数值公式、自动决策
+  与破坏状态机
+- [`godzilla-pet/tv/ART-DIRECTION.md`](godzilla-pet/tv/ART-DIRECTION.md) —
+  原图拆件、造型还原与动画实现
 
-归档压缩包：`巨兽都市-挂机版与源码.zip` 为当前版本全量打包；`雨夜新宿-游戏与源码.zip` 为更早的街机版存档，内容已过时，仅作历史保留。
+## archive/
+
+只放历史，不参与构建：
+
+| 文件 | 是什么 |
+| --- | --- |
+| `雨夜新宿.html` | 与 `godzilla-pet/dist/巨兽都市-挂机直播.html` 逐字节相同的重名副本（同 MD5），改名时误留的那一份 |
+| `雨夜新宿-游戏与源码.zip` | 更早的街机版存档：玩家还能操作的那一版，内容已过时 |
+| `巨兽都市-挂机版与源码.zip` | 旧版全量打包，已被仓库目录内容取代 |
 
 ## 技术说明
 
-原生 JavaScript 与 Canvas 2D，无构建步骤、无 npm 依赖。游戏内部以 640×360 渲染后放大到 1280×720，保持 16:9。
+原生 JavaScript 与 Canvas 2D，无构建步骤；桌宠的依赖只有 Electron 运行时本身。
+游戏画面内部以 640×360 渲染后放大到 1280×720，保持 16:9。
 
-角色不使用预录动画，而是在运行时按父子骨骼连续计算关节变换：12 个独立部件、13 个变换节点，走路、挥爪、吐息、重踏、咆哮、尾扫六组动作，嘴部光束与爪击特效读取骨骼世界坐标。
+角色不使用预录动画，而是在运行时按父子骨骼连续计算关节变换：12 个独立部件、
+13 个变换节点，走路、挥爪、吐息、重踏、咆哮、尾扫六组动作，嘴部光束与爪击特效
+读取骨骼世界坐标。静止绑定姿态与原图像素的最大 RGB 差值为 0。
 
 ## 字体许可
 
-界面使用 [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)，许可证见 `godzilla-shinjuku/assets/fonts/LICENSE-OFL`。
+界面使用 [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)，
+许可证见 `godzilla-pet/tv/assets/fonts/LICENSE-OFL`。代码 MIT。

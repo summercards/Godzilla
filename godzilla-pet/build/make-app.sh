@@ -117,8 +117,8 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>巨兽都市桌宠</string>
   <key>CFBundleDisplayName</key><string>巨兽都市桌宠</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>2.6.0</string>
+  <key>CFBundleVersion</key><string>26</string>
 $ICON_KEY
   <key>LSMinimumSystemVersion</key><string>10.15</string>
   <key>LSUIElement</key><true/>

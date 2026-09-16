@@ -14,8 +14,15 @@
  * 真跑一遍脚本装到临时目录，检查产物本身，而不是检查源码里有没有某句话。
  */
 'use strict';
-const { test } = require('node:test');
+const { test: nodeTest } = require('node:test');
 const assert = require('node:assert');
+
+/* 这个文件整个是 macOS 专属：产物是 .app、要用 sh 跑打包脚本、还要读
+ * Info.plist。别的平台上逐条 skip —— 明确标记成"跳过"而不是伪装成通过，
+ * 也不会因为环境里没有 sh 就抛一堆看不懂的 ENOENT。 */
+const test = process.platform === 'darwin'
+  ? nodeTest
+  : (name, fn) => nodeTest(name, { skip: '仅 macOS 可跑：产物是 .app' }, fn);
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');

@@ -1,22 +1,24 @@
 /* 巨兽都市桌宠 · Electron 主进程
  *
- * 两套画面共用同一套窗口骨架，靠 state.mode 切换：
+ * 窗口里播的是游戏画面（./tv）—— 直接 loadFile 打开，不复制、不改写，
+ * 所以 tv 目录一个字节都没动过。视口固定成原版的 1280×720，只用一个缩放系数
+ * 整体缩小，因此版面、行距、断点全都与原版一模一样。
  *
- *   tv  —— 迷你电视。直接把原版游戏（../godzilla-shinjuku）装进一个小窗，
- *          窗口内的视口固定成原版的 1280×720，只用一个缩放系数整体缩小。
- *          因此版面、行距、断点全都与原版一模一样，原版目录一个字节都不改。
+ * 主进程除了窗口与托盘，还独占存档的写入权：存档是文件，路径在 userData 下，
+ * 画面只能通过 IPC 读写。理由见 save-store.js 顶部的注释。
+ * 游戏逻辑一律在画面自己那边。
  *
- *   pet —— 底座模式。重画的迷你底座场景，透明背景 + 自动鼠标穿透。
- *
- * 主进程只负责窗口与托盘，游戏逻辑一律在渲染层。
+ * 唯一的例外是存档这件事本身：画面认的是 localStorage，而这里把那个键
+ * 接到了文件上。动手的是 tv-preload.js —— 它凭什么能改到页面，见那个文件顶部。
  */
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, dialog, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { TV_DRAG_CSS, TV_SIZES, zoomFor } = require('./tv-config.js');
+const { TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, zoomFor } = require('./tv-config.js');
+const { createStore } = require('./save-store.js');
 
 const ASSETS = path.join(__dirname, 'assets');
 
@@ -38,51 +40,78 @@ app.setName('巨兽都市桌宠');
 
 const STATE_FILE = () => path.join(app.getPath('userData'), 'pet-window.json');
 
-/* 原版游戏的入口页。迷你电视直接播它——不复制、不改写，
- * godzilla-pet 里怎么折腾都不会影响到原版画面。 */
-const ORIGINAL_GAME = path.join(__dirname, '..', 'godzilla-shinjuku', 'index.html');
+/* 游戏画面的入口页。迷你电视直接播它——不复制、不改写，
+ * 桌宠里怎么折腾都不会影响到里面的画面。 */
+const ORIGINAL_GAME = path.join(__dirname, 'tv', 'index.html');
 
-/* 底座模式：固定 5:4 横构图。渲染层设计坐标 320 × 256，
- * 用横向而不是正方形，是因为角色连尾巴的长宽比接近 2:1，窗口太窄会横着裁掉。 */
-const PET_SIZES = {
-  small: { w: 240, h: 192, label: '小' },
-  medium: { w: 320, h: 256, label: '中' },
-  large: { w: 400, h: 320, label: '大' },
-};
+/* 画面的存档接管层。tv/ 里一个字节都不能改，存档就从外面劫持：
+ * 这个 preload 把画面用的那个 localStorage 键接到 <userData>/save/tv.json。
+ * 必须配 contextIsolation: false，原因见该文件顶部的说明。 */
+const TV_PRELOAD = path.join(__dirname, 'tv-preload.js');
 
-const MODES = {
-  tv: {
-    label: '迷你电视 · 原版画面',
-    file: ORIGINAL_GAME,
-    sizes: TV_SIZES,
-    defaultSize: 'medium',
-    viewportZoom: true,
-    // 电视里要能点"强化 / 技能树"那些按钮，所以不能透明、也不设成不抢焦点的 panel
-    transparent: false,
-    clickThrough: false,
-    panel: false,
-    preload: null,
-  },
-  pet: {
-    label: '底座模式 · 重绘场景',
-    file: path.join(__dirname, 'renderer', 'index.html'),
-    sizes: PET_SIZES,
-    defaultSize: 'medium',
-    viewportZoom: false,
-    transparent: true,
-    clickThrough: true,
-    // panel 让 macOS 把它当成辅助面板：浮在全屏应用之上，且不抢走输入焦点
-    panel: true,
-    preload: path.join(__dirname, 'preload.js'),
-  },
-};
+/* ------------------------------------------------------------------ *
+ * 控制按钮（窗口外的那个像素方块）
+ *
+ * 为什么必须是独立窗口 ——
+ *   画面的视口是 1120px，而窗户只有 500 出头，缩放系数 0.46。
+ *   画面里任何 UI 都会被这个系数砍掉一半多：12px 的字落到屏幕上只有 5.6px，
+ *   既看不清也点不准。想让它保持在 64px，就必须待在缩放之外，也就是另一个窗口。
+ *
+ * 它贴在电视窗口外侧，跟着窗口走（见 placeDock）。
+ * ------------------------------------------------------------------ */
+const DOCK_W = 96;                  // 按钮 88 + 8px 硬阴影在右下
+const DOCK_H = 96;
+const DOCK_GAP = 10;                // 与电视窗口之间留的空隙
+const DOCK_PRELOAD = path.join(__dirname, 'dock-preload.js');
+const DOCK_HTML = path.join(__dirname, 'dock.html');
 
+/* ------------------------------------------------------------------ *
+ * 观测面板窗口
+ *
+ * 它是**另一个 tv 实例**，放大到 1:1，和电视窗口并存 —— 电视那边不动一个像素。
+ * 之所以不把电视窗口本身放大：那样小电视就没了，而它本来就该一直挂在那儿播。
+ *
+ * 两个实例跑同一份 game.js，所以面板那份必须只读（见 panel-preload.js）。
+ * ------------------------------------------------------------------ */
+const PANEL_PRELOAD = path.join(__dirname, 'panel-preload.js');
+
+/* 面板高度放大系数。宽度跟电视成套；高度放宽是因为字放大之后，
+ * 标题、资源条、页签这些固定部分就要占掉 200px 出头 —— 再按电视原高，
+ * 窗口里只剩一条缝，打开面板什么都看不见、全靠滚动。
+ * 加出来的高度全部给内容区（growthContent 是纵向滚动的）。 */
+const PANEL_H_SCALE = 1.45;
+
+/* ------------------------------------------------------------------ *
+ * 存档
+ *
+ * 存档放在 userData 下的 save/ 目录里，跟窗口状态文件分开：
+ * 窗口位置丢了无所谓，存档丢了不可再生，两者不该共用一份文件，
+ * 也不该共用同一套出错处理。
+ *
+ * store 延迟创建：app.getPath('userData') 要等 app 就绪后才能调用，
+ * 而 setName 又必须在任何一次路径解析之前执行（见上面那段注释）。
+ * ------------------------------------------------------------------ */
+const SAVE_DIR = () => path.join(app.getPath('userData'), 'save');
+
+/* 版本号是这一层唯一的把关点：版本对不上的存档一概不认，
+ * 让画面拿到空档从 1 级开始，也好过按新字段去解释旧数据。
+ *
+ * payload 保持字符串而不是解析后的对象 —— 它就是 localStorage 里原本的那个值
+ * （tv/game.js 的 economy.serialize() 输出）。原样存取，才不会在往返中
+ * 丢掉画面那边的字段。 */
+const isSaveV1 = (d) =>
+  !!d && typeof d === 'object' && !Array.isArray(d) &&
+  d.version === 1 && typeof d.payload === 'string';
+
+let _store = null;
+const store = () => (_store ||= createStore({ dir: SAVE_DIR(), validate: isSaveV1 }));
+
+/* 只剩一种画面了：迷你电视。窗口只是个框，改的只有物理尺寸 ——
+ * 视口恒等于原版的 1280×720，靠缩放系数整体缩小，版面不受影响。 */
 const DEFAULTS = {
-  mode: 'tv',
-  size: { tv: 'medium', pet: 'medium' },
-  pos: { tv: null, pet: null },
+  size: 'medium',
+  pos: null,
   alwaysOnTop: true,
-  clickThrough: false,
   hidden: false,
 };
 
@@ -90,8 +119,7 @@ let win = null;
 let tray = null;
 let state = structuredClone(DEFAULTS);
 
-const mode = () => MODES[state.mode] || MODES.tv;
-const curSize = () => mode().sizes[state.size[state.mode]] || mode().sizes[mode().defaultSize];
+const curSize = () => TV_SIZES[state.size] || TV_SIZES.medium;
 
 /* ------------------------------------------------------------------ *
  * 状态持久化
@@ -104,27 +132,25 @@ function loadState() {
     raw = {};
   }
 
+  /* 这个文件比产品活得久，历史上出现过三种形状，都得读得出来：
+   *   1. 只有底座模式时：{ size, x, y }                       扁平
+   *   2. 两种模式并存时：{ mode, size:{tv,pet}, pos:{tv,pet} }
+   *   3. 现在（只剩迷你电视）：{ size, pos:{x,y} }
+   * 统一收敛到形状 3，读不出来的字段各自回落到默认值，
+   * 这样从任何一版升上来都不会因为窗口位置读崩。 */
+  const pickSize = (v) => (TV_SIZES[v] ? v : DEFAULTS.size);
+  const pickPos = (v) =>
+    v && Number.isFinite(v.x) && Number.isFinite(v.y) ? { x: v.x, y: v.y } : null;
+
+  const legacyPos = Number.isFinite(raw.x) && Number.isFinite(raw.y) ? { x: raw.x, y: raw.y } : null;
+  const pos = raw.pos && typeof raw.pos === 'object' ? raw.pos.tv ?? raw.pos : null;
+
   state = {
-    mode: MODES[raw.mode] ? raw.mode : DEFAULTS.mode,
+    size: pickSize(raw.size && typeof raw.size === 'object' ? raw.size.tv : raw.size),
+    pos: pickPos(pos) || pickPos(legacyPos),
     alwaysOnTop: raw.alwaysOnTop !== false,
-    clickThrough: raw.clickThrough === true,
     hidden: raw.hidden === true,
-    size: {},
-    pos: {},
   };
-
-  for (const key of Object.keys(MODES)) {
-    const want = raw.size && typeof raw.size === 'object' ? raw.size[key] : null;
-    state.size[key] = MODES[key].sizes[want] ? want : MODES[key].defaultSize;
-
-    const p = raw.pos && typeof raw.pos === 'object' ? raw.pos[key] : null;
-    if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) state.pos[key] = { x: p.x, y: p.y };
-    else if (key === 'pet' && Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
-      // 老存档：那时只有底座模式，size/x/y 是扁平的
-      state.pos[key] = { x: raw.x, y: raw.y };
-      if (MODES.pet.sizes[raw.size]) state.size.pet = raw.size;
-    } else state.pos[key] = null;
-  }
 }
 
 function saveState() {
@@ -164,18 +190,16 @@ function clampToVisible(x, y, w, h) {
 function rememberBounds() {
   if (!win || win.isDestroyed()) return;
   const [x, y] = win.getPosition();
-  state.pos[state.mode] = { x, y };
+  state.pos = { x, y };
 }
 
 /* ------------------------------------------------------------------ *
  * 窗口
  * ------------------------------------------------------------------ */
 function createWindow() {
-  const m = mode();
   const size = curSize();
-  const saved = state.pos[state.mode];
-  const pos = saved
-    ? clampToVisible(saved.x, saved.y, size.w, size.h)
+  const pos = state.pos
+    ? clampToVisible(state.pos.x, state.pos.y, size.w, size.h)
     : defaultPosition(size.w, size.h);
 
   const w = new BrowserWindow({
@@ -183,8 +207,9 @@ function createWindow() {
     height: size.h,
     x: pos.x,
     y: pos.y,
-    transparent: m.transparent,
-    backgroundColor: m.transparent ? '#00000000' : '#050a15',
+    // 电视里要能点"强化 / 技能树"那些按钮，所以不能透明、也不能设成不抢焦点的 panel
+    transparent: false,
+    backgroundColor: '#050a15',
     frame: false,
     hasShadow: false,
     resizable: false,
@@ -193,34 +218,36 @@ function createWindow() {
     fullscreenable: false, // 挡住页面里的"全屏直播"——小电视不该变成全屏
     skipTaskbar: true,
     alwaysOnTop: state.alwaysOnTop,
-    ...(process.platform === 'darwin' && m.panel ? { type: 'panel', focusable: false } : {}),
     webPreferences: {
-      ...(m.preload ? { preload: m.preload } : {}),
-      contextIsolation: true,
+      preload: TV_PRELOAD,
+      /* 必须关掉隔离：存档接管要改的是页面那一份 Storage.prototype，
+       * 隔离世界里改的是另一个对象，碰不到画面。nodeIntegration 仍为 false，
+       * 页面拿不到 require。详见 tv-preload.js 顶部。 */
+      contextIsolation: false,
       nodeIntegration: false,
       backgroundThrottling: false, // 挂机游戏不能因为窗口失焦就降频
     },
   });
   win = w;
 
-  w.loadFile(m.file);
+  w.loadFile(ORIGINAL_GAME);
 
-  if (m.viewportZoom) {
-    // 版面锚点：加载完成后把缩放系数定死，视口就恒等于原版的 1280×720
-    w.webContents.on('did-finish-load', () => {
-      w.webContents.setZoomFactor(zoomFor(size.w));
-      w.webContents.insertCSS(TV_DRAG_CSS).catch(() => {});
-    });
-    // 右键弹同一套控制菜单：frameless 窗口没有标题栏，总得有个入口
-    w.webContents.on('context-menu', () => {
-      Menu.buildFromTemplate(controlTemplate()).popup({ window: w });
-    });
-  }
+  // 版面锚点：加载完成后把缩放系数定死，视口就恒等于原版的设计尺寸。
+  // 两条注入一起下：拖动区域（不动呈现），以及藏掉画面里那排小按钮
+  // （唯一的呈现改动，理由见 tv-config.js 顶部的说明）。
+  w.webContents.on('did-finish-load', () => {
+    w.webContents.setZoomFactor(zoomFor(size.w));
+    w.webContents.insertCSS(TV_DRAG_CSS).catch(() => {});
+    w.webContents.insertCSS(TV_HIDE_DOCK_CSS).catch(() => {});
+  });
+  // 右键弹控制菜单：frameless 窗口没有标题栏，总得有个入口
+  w.webContents.on('context-menu', () => {
+    Menu.buildFromTemplate(controlTemplate()).popup({ window: w });
+  });
 
   // screen-saver 层级高于普通置顶，能压在菜单栏与全屏窗口之上
   if (state.alwaysOnTop) w.setAlwaysOnTop(true, 'screen-saver');
   w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  if (m.clickThrough && state.clickThrough) w.setIgnoreMouseEvents(true, { forward: true });
   if (state.hidden) w.hide();
 
   // 拖动过程中持续记录位置，节流写入避免拖动时狂刷磁盘
@@ -230,7 +257,7 @@ function createWindow() {
     saveTimer = setTimeout(() => {
       if (!win || win.isDestroyed()) return;
       const [x, y] = win.getPosition();
-      state.pos[state.mode] = { x, y };
+      state.pos = { x, y };
       saveState();
     }, 400);
   };
@@ -244,6 +271,181 @@ function createWindow() {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  // 控制按钮要一直贴着窗口，窗口一动就得重新摆
+  w.on('moved', placeDock);
+  w.on('resize', placeDock);
+  // 面板窗口开着的时候同理
+  w.on('moved', placePanel);
+  w.on('resize', placePanel);
+}
+
+/* ------------------------------------------------------------------ *
+ * 控制按钮：创建、跟随、点开
+ * ------------------------------------------------------------------ */
+let dock = null;
+
+/* 面板窗口。它是个真正的独立窗口，和电视窗口并存；
+ * 非 null 就代表面板正开着。 */
+let panelWin = null;
+
+function createDock() {
+  dock = new BrowserWindow({
+    width: DOCK_W,
+    height: DOCK_H,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: DOCK_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  dock.loadFile(DOCK_HTML);
+  dock.setAlwaysOnTop(true, 'screen-saver');
+  dock.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  dock.on('closed', () => { dock = null; });
+  placeDock();
+  // 窗口本来就是藏着的（上次退出时收起了），按钮也一起藏着，
+  // 否则桌面上会只剩一个没主的按钮
+  if (state.hidden) dock.hide();
+}
+
+/* 把按钮摆到电视窗口外侧。
+ *
+ * 优先左侧 —— 电视默认落在主屏右下角，左边一定有地方。
+ * 左边顶到屏幕边缘就翻到右侧；两边都挤不下（窗口宽得快占满屏幕）时
+ * 退到窗口内部左下角：宁可压住一点画面，也不能让按钮跑到屏幕外点不到。 */
+function placeDock() {
+  if (!dock || dock.isDestroyed() || !win || win.isDestroyed() || !win.isVisible()) return;
+
+  const b = win.getBounds();
+  const area = screen.getDisplayMatching(b).workArea;
+
+  const y = Math.min(Math.max(b.y + b.height - DOCK_H, area.y), area.y + area.height - DOCK_H);
+  let x = b.x - DOCK_W - DOCK_GAP;
+
+  if (x < area.x) {
+    const right = b.x + b.width + DOCK_GAP;
+    x = right + DOCK_W <= area.x + area.width ? right : b.x + DOCK_GAP;
+  }
+
+  dock.setBounds({ x: Math.round(x), y: Math.round(y), width: DOCK_W, height: DOCK_H });
+}
+
+/* 把面板窗口摆在电视窗口旁边，跟它成对。
+ *
+ * 优先右侧（面板是电视的"遥控屏"，放右手边顺手）；
+ * 右边顶到屏幕边缘就翻到左侧；两边都放不下时退回居中 ——
+ * 宁可盖住一点别的，也不能跑到屏幕外。 */
+function placePanel() {
+  if (!panelWin || panelWin.isDestroyed() || !win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  const p = panelWin.getBounds();
+  const area = screen.getDisplayMatching(b).workArea;
+
+  const y = Math.min(Math.max(b.y, area.y), Math.max(area.y, area.y + area.height - p.height));
+
+  /* 控制按钮可能贴在电视右侧（电视靠左时 placeDock 会翻到右侧）。
+   * 不让出这段距离，按钮就会压在面板上 —— 用户截图里右上角那个
+   * 叠在面板上的方块就是这次撞位。 */
+  let anchor = b.x + b.width;
+  if (dock && !dock.isDestroyed() && dock.isVisible()) {
+    const d = dock.getBounds();
+    if (d.x >= b.x + b.width) anchor = Math.max(anchor, d.x + d.width);
+  }
+
+  const right = anchor + DOCK_GAP;
+  let x;
+  if (right + p.width <= area.x + area.width) x = right;
+  else if (b.x - DOCK_GAP - p.width >= area.x) x = b.x - DOCK_GAP - p.width;
+  else x = Math.round(area.x + (area.width - p.width) / 2);
+
+  panelWin.setBounds({ x: Math.round(x), y: Math.round(y), width: p.width, height: p.height });
+}
+
+/* 打开观测面板。
+ *
+ * 开的是**另一个窗口**，不是把这个窗口放大 —— 小电视要一直挂在那儿播，
+ * 面板只是它旁边多出来的一块。这也是这个按钮存在的意义：把功能从被
+ * 0.46 倍缩放压扁的画面里救出来。
+ *
+ * 面板窗口加载的是同一份 tv 页面、同一份 game.js，所以四个页面连同交互
+ * 是它自己画好的，一行都没重写。它唯一被限制的是不准写存档
+ * （见 panel-preload.js），落盘由电视窗口独占，否则两个实例会互相覆盖。 */
+function openPanel() {
+  if (!win || win.isDestroyed()) return;
+  if (panelWin && !panelWin.isDestroyed()) { panelWin.show(); panelWin.focus(); return; }
+
+  // 尺寸跟电视窗口的当前档位走 —— 两个窗口要成套，
+  // 一大一小摆在一起很突兀（用户原话："这个面板很大"）。
+  // 缩放却必须保持 1：面板要的是游戏自己的窄屏紧凑断点
+  // （max-height:480 那套，字号是真实的屏幕像素），而不是把 1120 宽的
+  // 直播版面再压扁一遍 —— 那正是"文字太小无法看到"的原因。
+  const s = curSize();
+
+  panelWin = new BrowserWindow({
+    width: s.w,
+    height: Math.round(s.h * PANEL_H_SCALE),
+    frame: false,
+    backgroundColor: '#050a15',
+    hasShadow: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    show: false,
+    webPreferences: {
+      preload: PANEL_PRELOAD,
+      // 同 tv-preload：存档接管要改页面那一份 Storage.prototype
+      contextIsolation: false,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  });
+
+  panelWin.loadFile(ORIGINAL_GAME);
+  panelWin.webContents.on('did-finish-load', () => {
+    /* zoom 必须显式钉回 1，哪怕"没设过"。
+     *
+     * Chromium 把缩放按**来源**存在会话里：电视窗口对同一个 file:// 页面
+     * 设过 0.41，面板窗口加载同一来源时会静默继承那份缩放 —— 实测
+     * clientWidth 是 1120 而不是窗口宽度，菜单里的字全部缩到 5px。
+     * 不显式设 1，"面板不缩放"就只是个没生效的愿望。 */
+    panelWin.webContents.setZoomFactor(1);
+    // 四条注入：拖动把手、藏画面里的小按钮、只留观测面板（见 tv-config.js）、
+    // 以及可读性放大 —— 字与按钮整体大一号（用户反馈"字也太小了"）。
+    panelWin.webContents.insertCSS(TV_DRAG_CSS).catch(() => {});
+    panelWin.webContents.insertCSS(TV_HIDE_DOCK_CSS).catch(() => {});
+    panelWin.webContents.insertCSS(PANEL_ONLY_CSS).catch(() => {});
+    panelWin.webContents.insertCSS(PANEL_READABLE_CSS).catch(() => {});
+  });
+  panelWin.once('ready-to-show', () => { if (panelWin) panelWin.show(); });
+  panelWin.on('closed', () => { panelWin = null; });
+
+  placePanel();
+}
+
+/* 面板关掉就收窗。
+ *
+ * 由画面那边上报（panel:done），不是这里主动关 —— 面板有三个出口
+ * （× 返回直播、Esc、将来别的），让画面统一告诉我们才不会漏。 */
+function closePanel() {
+  if (panelWin && !panelWin.isDestroyed()) panelWin.close();
+}
+
+function togglePanel() {
+  if (panelWin && !panelWin.isDestroyed()) closePanel();
+  else openPanel();
 }
 
 /* ------------------------------------------------------------------ *
@@ -256,10 +458,6 @@ function trayIcon() {
   return fs.existsSync(p) ? p : undefined;
 }
 
-function send(channel, payload) {
-  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
-}
-
 function applyAlwaysOnTop(on) {
   state.alwaysOnTop = on;
   if (win) {
@@ -268,50 +466,20 @@ function applyAlwaysOnTop(on) {
   }
   saveState();
   refreshTray();
-  send('pet:flags', publicFlags());
-}
-
-function applyClickThrough(on) {
-  state.clickThrough = on;
-  if (win && mode().clickThrough) {
-    win.setIgnoreMouseEvents(on, { forward: true });
-    // 关掉强制穿透时置空，把控制权交还给渲染层的自动判定
-    win.__ignoring = on ? true : null;
-  }
-  saveState();
-  refreshTray();
-  send('pet:flags', publicFlags());
 }
 
 function applySize(key) {
-  const m = mode();
-  if (!m.sizes[key] || !win || win.isDestroyed()) return;
+  if (!TV_SIZES[key] || !win || win.isDestroyed()) return;
   const [x, y] = win.getPosition();
-  const s = m.sizes[key];
-  state.size[state.mode] = key;
-  state.pos[state.mode] = { x, y };
+  const s = TV_SIZES[key];
+  state.size = key;
+  state.pos = { x, y };
   win.setBounds({ x, y, width: s.w, height: s.h });
   // 缩放系数跟着窗口宽度走，版面才不会因为改尺寸而错位
-  if (m.viewportZoom) win.webContents.setZoomFactor(zoomFor(s.w));
+  win.webContents.setZoomFactor(zoomFor(s.w));
   saveState();
   refreshTray();
-  send('pet:flags', publicFlags());
-}
-
-function switchMode(key) {
-  if (!MODES[key] || key === state.mode) return;
-  rememberBounds();
-  const wasHidden = state.hidden;
-  state.mode = key;
-  saveState();
-
-  const old = win;
-  win = null; // 先断开，避免旧窗的 closed 事件把新窗引用抹掉
-  if (old && !old.isDestroyed()) old.destroy();
-
-  createWindow();
-  if (wasHidden) win.hide();
-  refreshTray();
+  placeDock();
 }
 
 function toggleVisible(force) {
@@ -322,58 +490,42 @@ function toggleVisible(force) {
   state.hidden = typeof force === 'boolean' ? force : !state.hidden;
   if (state.hidden) win.hide();
   else win.showInactive(); // showInactive：显示但不抢焦点
+
+  // 按钮跟着一起收放，否则窗口收起来了按钮还孤零零留在桌面上
+  if (dock && !dock.isDestroyed()) {
+    if (state.hidden) dock.hide();
+    else { placeDock(); dock.showInactive(); }
+  }
+
   saveState();
   refreshTray();
-  send('pet:flags', publicFlags());
 }
 
 function resetPosition() {
   if (!win || win.isDestroyed()) return;
   const p = defaultPosition(curSize().w, curSize().h);
   win.setPosition(p.x, p.y);
-  state.pos[state.mode] = p;
+  state.pos = p;
   saveState();
-}
-
-function publicFlags() {
-  return {
-    mode: state.mode,
-    alwaysOnTop: state.alwaysOnTop,
-    clickThrough: state.clickThrough,
-    hidden: state.hidden,
-    size: state.size[state.mode],
-    sizes: Object.fromEntries(
-      Object.entries(mode().sizes).map(([k, v]) => [k, { w: v.w, h: v.h, label: v.label }]),
-    ),
-  };
+  placeDock();
 }
 
 /* 托盘与右键菜单共用同一份模板 */
 function controlTemplate() {
-  const m = mode();
-  const items = [
+  return [
     { label: '巨兽都市桌宠', enabled: false },
-    { label: m.label, enabled: false },
+    { label: '迷你电视 · 原版画面', enabled: false },
     { type: 'separator' },
     { label: state.hidden ? '显示' : '收起', click: () => toggleVisible() },
     { label: '回到右下角', click: resetPosition },
     { type: 'separator' },
     {
       label: '窗口大小',
-      submenu: Object.entries(m.sizes).map(([key, s]) => ({
+      submenu: Object.entries(TV_SIZES).map(([key, s]) => ({
         label: `${s.label}  (${s.w}×${s.h})`,
         type: 'radio',
-        checked: state.size[state.mode] === key,
+        checked: state.size === key,
         click: () => applySize(key),
-      })),
-    },
-    {
-      label: '画面',
-      submenu: Object.entries(MODES).map(([key, v]) => ({
-        label: v.label,
-        type: 'radio',
-        checked: state.mode === key,
-        click: () => switchMode(key),
       })),
     },
     {
@@ -382,22 +534,16 @@ function controlTemplate() {
       checked: state.alwaysOnTop,
       click: (item) => applyAlwaysOnTop(item.checked),
     },
+    { type: 'separator' },
+    saveTemplate(),
+    { type: 'separator' },
+    { label: '退出', role: 'quit' },
   ];
-  if (m.clickThrough) {
-    items.push({
-      label: '穿透点击（只观赏）',
-      type: 'checkbox',
-      checked: state.clickThrough,
-      click: (item) => applyClickThrough(item.checked),
-    });
-  }
-  items.push({ type: 'separator' }, { label: '退出', role: 'quit' });
-  return items;
 }
 
 function refreshTray() {
   if (!tray) return;
-  tray.setToolTip(`巨兽都市桌宠 · ${mode().label}`);
+  tray.setToolTip('巨兽都市桌宠 · 迷你电视');
   tray.setContextMenu(Menu.buildFromTemplate(controlTemplate()));
 }
 
@@ -415,82 +561,246 @@ function createTray() {
 }
 
 /* ------------------------------------------------------------------ *
- * IPC：全部来自渲染层（只有底座模式用），逐条做类型校验
+ * IPC：迷你电视完全自足，没有任何需要主进程代劳的操作。
+ * 唯一的桥是存档（见下面的 registerSaveIPC）与 tv-preload.js。
  * ------------------------------------------------------------------ */
-function registerIPC() {
-  ipcMain.on('pet:drag', (_e, payload) => {
-    if (!win || win.isDestroyed() || state.clickThrough) return;
-    const x = Math.round(Number(payload?.x));
-    const y = Math.round(Number(payload?.y));
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    win.setPosition(x, y);
-  });
 
-  ipcMain.on('pet:dragEnd', () => {
-    if (!win || win.isDestroyed()) return;
-    const [x, y] = win.getPosition();
-    state.pos[state.mode] = { x, y };
-    saveState();
-  });
+/* ------------------------------------------------------------------ *
+ * 存档：操作实现
+ *
+ * 抽成普通函数而不是直接写在 IPC 里，是为了让托盘菜单和右键菜单
+ * 走同一条代码路径 —— 两个入口各写一遍迟早会有一套忘了做校验。
+ * ------------------------------------------------------------------ */
+const pickWin = (kind, options) =>
+  (win && !win.isDestroyed() ? dialog[kind](win, options) : dialog[kind](options));
 
-  ipcMain.on('pet:menu', (_e, payload) => {
-    if (!win || win.isDestroyed()) return;
-    const s = payload && typeof payload === 'object' ? payload : {};
-    const template = [
-      { label: s.title || '巨兽都市桌宠', enabled: false },
-      { label: s.subtitle || '', enabled: false, visible: !!s.subtitle },
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+
+function revealSave() {
+  store().ensureDir();
+  shell.openPath(store().info().dir);
+}
+
+async function exportSave() {
+  const info = store().info();
+  if (!info.hasSave && !info.hasBackup) {
+    await pickWin('showMessageBox', {
+      type: 'info', message: '还没有存档可以导出',
+      detail: '等它拆掉第一栋楼，或者先让它在桌面上挂一会儿。',
+    });
+    return { ok: false, error: '没有存档' };
+  }
+  const r = await pickWin('showSaveDialog', {
+    title: '导出桌宠存档',
+    defaultPath: path.join(app.getPath('documents'), `巨兽都市桌宠-存档-${stamp()}.json`),
+    filters: [{ name: '存档', extensions: ['json'] }],
+  });
+  if (r.canceled || !r.filePath) return { ok: false, canceled: true, error: null };
+  const out = store().exportTo(r.filePath);
+  if (out.ok) await pickWin('showMessageBox', {
+    type: 'info', message: '已导出', detail: r.filePath,
+  });
+  else await pickWin('showMessageBox', {
+    type: 'error', message: '导出失败', detail: out.error || '未知原因',
+  });
+  return out;
+}
+
+async function importSave() {
+  const r = await pickWin('showOpenDialog', {
+    title: '从备份导入存档',
+    properties: ['openFile'],
+    filters: [{ name: '存档', extensions: ['json'] }],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true, error: null };
+
+  // 覆盖之前先问一句：导入是单向的，当前进度会被顶掉
+  const ask = await pickWin('showMessageBox', {
+    type: 'warning',
+    buttons: ['取消', '导入'],
+    defaultId: 0,
+    cancelId: 0,
+    message: '导入这份存档？',
+    detail: '当前进度会被替换掉（现有存档会退位成备份，仍可导出找回）。',
+  });
+  if (ask.response !== 1) return { ok: false, canceled: true, error: null };
+
+  const out = store().importFrom(r.filePaths[0]);
+  if (out.ok) reloadSave();
+  else await pickWin('showMessageBox', {
+    type: 'error', message: '这个文件不是有效的存档', detail: out.error || '未知原因',
+  });
+  return out;
+}
+
+async function resetSave() {
+  const ask = await pickWin('showMessageBox', {
+    type: 'warning',
+    buttons: ['取消', '重置存档'],
+    defaultId: 0,
+    cancelId: 0,
+    message: '重置桌宠存档？',
+    detail: '核能、等级、突变点、技能、破坏进度与所在城区全部归零，且无法撤销。\n存档文件和它的备份会被一起删掉。',
+  });
+  if (ask.response !== 1) return { ok: false, canceled: true, error: null };
+  const out = store().clear();
+  if (out.ok) reloadSave();
+  return out;
+}
+
+/* 导入/重置与自动存档之间有一场竞态：画面每 5 秒存一次盘，那一次写完全可能
+ * 已经在路上，落地时间却晚于导入，于是把刚导入的档又盖回旧数据 ——
+ * 用户看到的是"导入没生效"，而磁盘上什么都没坏，最难查的那种。
+ *
+ * 用一个闸门掐掉那段时间窗：从导入成功到画面下一次握手之间，写盘一律拒绝。
+ * 画面的握手一旦被应答就自动开闸，所以闸门最多关一个 IPC 往返。 */
+let reloading = false;
+const SAVE_BUSY = { ok: false, bytes: 0, error: '存档正在重新载入' };
+
+/* 存档换了内容，让画面重新载入它。
+ *
+ * 画面把存档攥在 preload 的内存里（tv-preload.js），导入之后那份内存还是旧的，
+ * 所以必须整页重载 —— 重载会重走一遍 preload 的同步握手，拿到刚导入的档。
+ * 代价是城市按新档重建；但导入本来就是换一个进度，这个代价是必然的。
+ *
+ * 同时关掉写盘闸门：页面卸载时 preload 会同步落一次盘，
+ * 那一次写会把刚导入的档又盖回旧数据。 */
+function reloadSave() {
+  reloading = true;
+  if (win && !win.isDestroyed()) win.webContents.reload();
+}
+
+/* 托盘与右键菜单共用的存档子菜单 */
+function saveTemplate() {
+  const info = store().info();
+  return {
+    label: '存档',
+    submenu: [
+      {
+        label: info.hasSave ? '打开存档文件夹' : '打开存档文件夹（还没有存档）',
+        click: revealSave,
+      },
       { type: 'separator' },
-      {
-        label: s.paused ? '继续拆楼' : '暂停拆楼',
-        click: () => send('pet:command', { type: 'togglePause' }),
-      },
-      {
-        label: s.muted ? '开启音效' : '静音',
-        click: () => send('pet:command', { type: 'toggleMute' }),
-      },
+      { label: '导出备份…', click: () => { exportSave(); } },
+      { label: '从备份导入…', click: () => { importSave(); } },
       { type: 'separator' },
-      {
-        label: '窗口大小',
-        submenu: Object.entries(PET_SIZES).map(([key, sz]) => ({
-          label: `${sz.label}  (${sz.w}×${sz.h})`,
-          type: 'radio',
-          checked: state.size.pet === key,
-          click: () => applySize(key),
-        })),
-      },
-      {
-        label: '持续置顶',
-        type: 'checkbox',
-        checked: state.alwaysOnTop,
-        click: (item) => applyAlwaysOnTop(item.checked),
-      },
-      {
-        label: '穿透点击（只观赏）',
-        type: 'checkbox',
-        checked: state.clickThrough,
-        click: (item) => applyClickThrough(item.checked),
-      },
-      { type: 'separator' },
-      { label: '回到右下角', click: resetPosition },
-      { label: '收起（托盘里能叫回来）', click: () => toggleVisible(true) },
-      { label: '退出', role: 'quit' },
-    ];
-    Menu.buildFromTemplate(template).popup({ window: win });
+      { label: '重置存档…', click: () => { resetSave(); } },
+    ],
+  };
+}
+
+function registerSaveIPC() {
+  /* 画面的存档握手。
+   *
+   * 同步的，因为 game.js 一启动就同步读档 —— 这里必须当场把内容给它，
+   * 换成异步会让它先拿着一份新档跑起来，再被迟到的文件覆盖成第二次初始化。
+   *
+   * legacy 是画面原来那份 localStorage 存档（tv-preload.js 在装劫持之前读出来的）。
+   * 文件里还没有档、而浏览器存储里有的时候把它搬进文件 —— 装完劫持就再也
+   * 读不到那份老档了，只有这一次机会。搬完文件立刻存在，所以只会搬一次。 */
+  ipcMain.on('tv:saveBoot', (e, legacy) => {
+    reloading = false;                     // 握手应答即开闸
+
+    const r = store().read();
+    let payload = r.data && typeof r.data.payload === 'string' ? r.data.payload : null;
+    let migrated = false;
+
+    if (payload === null && typeof legacy === 'string' && legacy) {
+      const w = store().write({ version: 1, payload: legacy });
+      if (w.ok) { payload = legacy; migrated = true; }
+    }
+
+    e.returnValue = { payload, migrated, source: r.source };
   });
 
-  ipcMain.on('pet:quit', () => app.quit());
-  ipcMain.handle('pet:flags', () => publicFlags());
+  ipcMain.on('tv:saveWrite', (_e, payload) => {
+    if (reloading || typeof payload !== 'string') return;
+    store().write({ version: 1, payload });
+    syncPanel(payload);
+  });
 
-  /* 自动穿透：渲染层判定光标是否压在实体像素上，这里只负责切换。
-   * 强制穿透开启时忽略渲染层的请求，避免两边互相覆盖。 */
-  ipcMain.on('pet:setIgnoreMouse', (_e, ignore) => {
+  /* 同步写入。只在页面即将卸载（pagehide）时用：那一刻没有"稍后"，
+   * 异步 IPC 的回调根本来不及跑，而这是退出前的最后一次落盘机会。
+   * 日常的写入走异步那条，不阻塞渲染帧。 */
+  ipcMain.on('tv:saveWriteSync', (e, payload) => {
+    if (reloading || typeof payload !== 'string') { e.returnValue = SAVE_BUSY; return; }
+    e.returnValue = store().write({ version: 1, payload });
+    syncPanel(payload);
+  });
+
+  ipcMain.on('save:reveal', revealSave);
+  ipcMain.handle('save:export', exportSave);
+  ipcMain.handle('save:import', importSave);
+  ipcMain.handle('save:reset', resetSave);
+}
+
+/* 控制按钮与面板窗口之间的三条通道。
+ * 按钮只喊一声"开"；面板那边负责报"用户点了什么"和"我关了"。 */
+function registerDockIPC() {
+  ipcMain.on('dock:toggle', () => togglePanel());
+
+  /* 面板启动时要一份存档 —— 给文件里那一份。
+   * 面板自己不准写盘，只读这一份（见 panel-preload.js）。 */
+  ipcMain.on('panel:boot', (e) => {
+    const r = store().read();
+    e.returnValue = {
+      payload: r.data && typeof r.data.payload === 'string' ? r.data.payload : null,
+      source: r.source,
+    };
+  });
+
+  /* 面板里的点击转发过来，在电视窗口里执行同一个元素。
+   *
+   * 为什么不在这里直接把数据算出来：游戏的权威状态在电视窗口那个实例里，
+   * 面板只是个遥控器。让电视窗口自己去执行，进度、存档、画面才会一致 ——
+   * 否则面板改了内存、电视那边一无所知，五秒后电视一写盘就全盖回去。
+   *
+   * 掷骰是特例：电视窗口执行 rollEvolution 后，把结果挂到 el.__panelResult 上，
+   * 这里接出返回值、若是对象就回推给面板播动画（面板的骰子只是落在已知的面上，
+   * 动画不参与计算）。 */
+  ipcMain.on('panel:tap', (_e, payload) => {
     if (!win || win.isDestroyed()) return;
-    if (!mode().clickThrough || state.clickThrough) return; // 电视模式没有穿透这回事
-    const next = ignore === true;
-    if (win.__ignoring === next) return;   // 状态未变就不打扰系统
-    win.__ignoring = next;
-    win.setIgnoreMouseEvents(next, { forward: true });
+
+    const id = payload && typeof payload.id === 'string' ? payload.id : '';
+    // id 要拼进 JS 里执行，先挡一道；面板里的 id 都是常规标识符
+    if (!/^[A-Za-z][\w-]*$/.test(id)) return;
+
+    const isChange = payload.kind === 'change';
+    let body = 'el.click();';
+    if (isChange) {
+      if (typeof payload.checked === 'boolean') body = `el.checked = ${payload.checked};`;
+      else if (typeof payload.value === 'string') body = `el.value = ${JSON.stringify(payload.value)};`;
+      body += "el.dispatchEvent(new Event('change', { bubbles: true }));";
+    }
+
+    win.webContents
+      .executeJavaScript(
+        `(() => { const el = document.getElementById(${JSON.stringify(id)}); if (!el) return false; ${body} return el.__panelResult || true; })()`,
+      )
+      .then((r) => {
+        if (r && typeof r === 'object' && panelWin && !panelWin.isDestroyed()) {
+          panelWin.webContents.send('panel:rolled', r);
+        }
+      })
+      .catch(() => { /* 电视窗口还没就绪，这一下就算了 */ });
   });
+
+  ipcMain.on('panel:done', () => closePanel());
+}
+
+/* 面板的一致性同步：电视窗口每次落盘后，把 payload 推给面板。
+ *
+ * 面板的存档是只读的，它靠"同一份存档 + 同一串点击"和电视保持一致。
+ * 但电视在面板开着的时候一直在跑（自动升级、自动加点、自动进化），
+ * 面板对此一无所知 —— 没有这条同步，面板上的角标永远不亮，
+ * 玩家挂机 8 小时回来，面板还以为自己有 0 次进化机会。
+ *
+ * 从主进程推，而不是让电视窗口广播：面板窗口本来就是主进程创建的，
+ * 电视窗口不该知道面板的存在（否则就破坏了"桌宠只管窗口生命周期"的分层）。 */
+function syncPanel(payload) {
+  if (typeof payload !== 'string') return;
+  if (!panelWin || panelWin.isDestroyed()) return;
+  panelWin.webContents.send('panel:sync', payload);
 }
 
 /* ------------------------------------------------------------------ *
@@ -506,13 +816,22 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === 'darwin') app.dock?.hide(); // 桌宠不占 Dock
     Menu.setApplicationMenu(null);
     loadState();
-    registerIPC();
+    registerSaveIPC();
+    registerDockIPC();
     createWindow();
+    createDock();
     createTray();
   });
 
   // 托盘应用：关掉窗口不等于退出
   app.on('window-all-closed', () => {});
+
+  /* 退出前只需要记住窗口位置。
+   *
+   * 进度不用在这里操心：画面自己的 pagehide 里有一次同步落盘
+   * （tv-preload.js 的 flushSync），窗口关闭时必定跑到，
+   * 而且 sendSync 会一直阻塞到主进程把档写完为止 ——
+   * 主进程继续往下退出时，数据已经在磁盘上了。 */
   app.on('before-quit', () => {
     rememberBounds();
     saveState();

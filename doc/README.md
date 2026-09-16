@@ -1,0 +1,59 @@
+# 巨兽都市 · 文档目录
+
+这是项目的文档入口。所有文档按「谁负责什么」分层，**改动代码前先在这里找到对应文档**。
+
+## 目录
+
+```
+doc/
+├── README.md                    你正在看的这份：索引、阅读顺序、写作约定
+└── game-design/                 游戏设计文档
+    ├── 01-设计总纲.md            体验目标、设计支柱、铁律、与现有实现的边界
+    ├── 02-关卡路线.md            第 2 章 5 个关卡的完整路线设计
+    ├── 03-敌人图鉴.md            常规敌人 / 精英单位完整数值表
+    ├── 04-Boss设计.md            5 个关卡 Boss 的阶段、招式、压制机制
+    ├── 05-天气系统.md            天气状态机、影响矩阵、与关卡和成长的联动
+    ├── 06-成长系统.md            等级 / 天赋 / 随机突变 / 体貌映射
+    └── 07-成长界面与表现.md      加点 / 天赋 / 进化三个面板、骰子动画、转发链路
+```
+
+## 全项目文档地图
+
+`doc/` 只管**设计**。已经存在于别处的文档仍然是各自领域的权威来源，不要重复抄写：
+
+| 文档 | 层级 | 负责什么 |
+| --- | --- | --- |
+| [`README.md`](../README.md) | 产品 | 项目是什么、怎么跑起来、归档说明 |
+| [`godzilla-pet/README.md`](../godzilla-pet/README.md) | 桌宠 | 存档接管机制、窗口与电视比例、两个不报错的坑 |
+| [`godzilla-pet/CHANGELOG.md`](../godzilla-pet/CHANGELOG.md) | 桌宠 | 版本改动与验证记录 |
+| [`godzilla-pet/tv/README.md`](../godzilla-pet/tv/README.md) | 画面 | 玩法、界面、技能树、敌军、骨骼动画 |
+| [`godzilla-pet/tv/DESIGN.md`](../godzilla-pet/tv/DESIGN.md) | 画面 | **已上线版本**的数值公式、AI 决策、破坏状态机 |
+| [`godzilla-pet/tv/ART-DIRECTION.md`](../godzilla-pet/tv/ART-DIRECTION.md) | 画面 | 原图拆件、造型还原、动画实现 |
+| [`godzilla-pet/tv/CHANGELOG.md`](../godzilla-pet/tv/CHANGELOG.md) | 画面 | 画面 2.0 → 2.3 版本记录 |
+| `doc/game-design/*` | 设计 | **尚未实现**的后续关卡、天气、成长系统设计 |
+
+> **`tv/DESIGN.md` 与 `doc/game-design/` 的分工**：前者描述**已经跑起来**的那套数值，
+> 是改代码时的对照基准；后者描述**规划中**的扩展。两者冲突时以 `tv/DESIGN.md` 为准，
+> 因为那是线上行为。设计落地后，对应内容应当合并进 `tv/DESIGN.md` 并在这里改状态。
+
+## 阅读顺序
+
+| 你想做什么 | 按这个顺序读 |
+| --- | --- |
+| 第一次上手这个项目 | `../README.md` → 本文档 → `godzilla-pet/README.md` → `game-design/01-设计总纲.md` |
+| 改数值 / 平衡 | `tv/DESIGN.md` → `game-design/03-敌人图鉴.md` → `game-design/06-成长系统.md` |
+| 加新关卡 | `game-design/02-关卡路线.md` → `game-design/03-敌人图鉴.md` → `game-design/04-Boss设计.md` |
+| 改角色外观 | `game-design/06-成长系统.md`（体貌映射表）→ `tv/ART-DIRECTION.md` |
+| 改面板 / 加菜单 / 加动效 | `game-design/07-成长界面与表现.md` → `godzilla-pet/panel-preload.js`（面板架构的权威描述在它的文件头） |
+| 改天气 | `game-design/05-天气系统.md` |
+| 动存档格式 | `godzilla-pet/README.md`（存档章节，必须读）→ `game-design/06-成长系统.md`（存档扩展） |
+
+## 写作约定
+
+1. **数值必须给公式，不给魔数。** 出现等级 `L` 时先定义 `M = 1+(L-1)×0.07`（沿用线上定义），
+   再写公式。所有取整规则写明（四舍五入 / 向下取整）。
+2. **区域编号 = 关卡编号。** 项目里叫「区域」，代码里叫 `district`，SECTOR 编号即区域编号。
+   5 个区域构成一章（见 `02-关卡路线.md`），本文档中「关」与「区域」同义。
+3. **可破坏 / 不可失败的铁律写在 `01-设计总纲.md`**，任何新设计都要先过一遍那张表。
+4. **标注状态。** 每个文档头部标明「状态：设计中 / 已实现 / 已废弃」，落地后要回来改。
+5. **不复制已有文档。** 需要引用线上行为时给路径和章节名，不要抄一份会过期的副本。

@@ -1,0 +1,618 @@
+/* 巨兽都市 · 成长系统数值层
+ *
+ * 对应 doc/game-design/06-成长系统.md，落地后 DESIGN.md 应以本文件行为为准。
+ *
+ * 四层成长，各有各的货币，互不抢：
+ *   强化   核能        四项数值的底子          （原有）
+ *   加点   升级白给    保底成长，不看核能        （本次新增）
+ *   技能树 dna         它能做什么              （原有）
+ *   天赋   天赋点      它是什么 —— 体貌         （本次新增）
+ *   突变   不需要货币   它长什么样，每级自动抽一次 （本次新增）
+ *
+ * 两条铁律，破坏任何一条都会毁掉"这头巨兽独一无二"：
+ *   1. 决定外观的随机一律走 hashSeed + mulberry32，绝不用 Math.random()
+ *   2. 按 level 派生独立序列，不用全局连续流 —— 否则将来在别处插一次随机调用，
+ *      后续所有突变就会错位，和已落盘的 mutations 对不上
+ *
+ * 天气是可选输入：本次只做成长，weather 传 null 时所有天气系数取 1。
+ * 接口留好，05-天气系统.md 落地时不用改这里。
+ */
+(function (root) {
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * 强化项与技能树（原有，不动）
+ * ------------------------------------------------------------------ */
+const STATS = {
+  power: { name: '巨兽力量', base: 80, desc: '爪击、重踏与尾击伤害' },
+  atomic: { name: '原子炉心', base: 95, desc: '吐息伤害与高能强度' },
+  metabolism: { name: '核能代谢', base: 70, desc: '被动产能与破坏收益' },
+  stride: { name: '巨躯动能', base: 90, desc: '行进速度与抗封锁能力' },
+};
+
+const SKILLS = [
+  { id: 'impact', name: '震荡爪击', branch: 'kinetic', cost: 1, requires: null, desc: '爪击冲击相邻建筑，额外造成 40% 伤害' },
+  { id: 'throw', name: '巨兽投掷', branch: 'kinetic', cost: 2, requires: 'impact', desc: '被拍飞的残骸撞击其他敌人，造成连锁爆破' },
+  { id: 'seismic', name: '地脉崩解', branch: 'kinetic', cost: 3, requires: 'throw', desc: '重踏范围 +60%，建筑破坏伤害翻倍' },
+  { id: 'pierce', name: '贯穿吐息', branch: 'atomic', cost: 1, requires: null, desc: '原子光束贯穿首个目标，追加攻击后方目标' },
+  { id: 'chain', name: '电离连锁', branch: 'atomic', cost: 2, requires: 'pierce', desc: '光束命中后向附近军队传导电弧' },
+  { id: 'meltdown', name: '红莲临界', branch: 'atomic', cost: 3, requires: 'chain', desc: '每第三次吐息转为红莲射线，伤害 ×2.5' },
+  { id: 'harvest', name: '辐射汲取', branch: 'evolution', cost: 1, requires: null, desc: '所有核能获取 +25%，持续提高挂机收益' },
+  { id: 'momentum', name: '不可阻挡', branch: 'evolution', cost: 2, requires: 'harvest', desc: '军队对前进速度的压制降低 40%' },
+  { id: 'overdrive', name: '原始觉醒', branch: 'evolution', cost: 3, requires: 'momentum', desc: '技能冷却缩短 25%，离线收益效率提升至 90%' },
+];
+
+/* ------------------------------------------------------------------ *
+ * 天赋网格：3 环 × 6 节点 × 3 级
+ *
+ * 三环有先后门槛（见 RING_GATE），这样"树"才真的成立 ——
+ * 否则玩家会一上来就把 18 个点位摊平，体貌和元素都不会成形。
+ * ------------------------------------------------------------------ */
+const RING_GATE = [0, 4, 4];   // 开启本环所需的「上一环累计投入」
+
+const TALENT_RINGS = [
+  {
+    key: 'morph', name: '体貌',
+    desc: '直接改身体，每个节点都有可见的形状变化',
+    nodes: [
+      { id: 'mass', name: '巨躯', desc: '体型变大，近战判定同步放大' },
+      { id: 'spines', name: '脊刺', desc: '背刺更多、更高，高级出现分叉' },
+      { id: 'talons', name: '锐爪', desc: '前爪变长变弯，爪击判定变大' },
+      { id: 'tailwhip', name: '长尾', desc: '尾巴更长，尾尖变形' },
+      { id: 'carapace', name: '甲胄', desc: '鳞甲出现分块线，受击闪光变弱' },
+      { id: 'jaws', name: '巨颌', desc: '牙列变长，吐息蓄力更快' },
+    ],
+  },
+  {
+    key: 'element', name: '元素',
+    desc: '第一个点满 3 级的节点成为主元素，决定背刺与吐息的颜色',
+    nodes: [
+      { id: 'pyro', name: '赤焰', color: '#ff5a3c', desc: '吐息附带燃烧：3 秒内追加 25% 伤害' },
+      { id: 'volt', name: '苍雷', color: '#a8d8ff', desc: '命中弹射 1 道电弧（50% 伤害）至最近单位' },
+      { id: 'cryo', name: '冰棘', color: '#dff4ff', desc: '命中使目标减速 30%，持续 2 秒' },
+      { id: 'venom', name: '腐毒', color: '#b58cff', desc: '破坏建筑时溅射毒雾（120px）' },
+      { id: 'radiant', name: '辐热', color: '#7affd0', desc: '核能产出 +8% / 级' },
+      { id: 'magma', name: '熔核', color: '#ff8a3c', desc: '体型额外 +3% / 级，躯干浮出熔岩裂纹' },
+    ],
+  },
+  {
+    key: 'instinct', name: '本能',
+    desc: '不改外观，改行为与天气适应',
+    nodes: [
+      { id: 'hunter', name: '猎手嗅觉', desc: '优先锁定最容易造成压制的目标' },
+      { id: 'stormcraft', name: '风暴适应', desc: '恶劣天气的速度惩罚减半' },
+      { id: 'conductor', name: '雷暴导体', desc: '雷暴 / 磁暴天气下吐息伤害 +30%' },
+      { id: 'rubblewalker', name: '废墟行者', desc: '建筑倒塌的额外收益 +15% / 级' },
+      { id: 'nocturnal', name: '夜行', desc: '血月天气下核能产出 +20% / 级' },
+      { id: 'sleepless', name: '无眠', desc: '离线收益效率 +5% / 级' },
+    ],
+  },
+];
+
+const TALENT_NODES = TALENT_RINGS.flatMap((ring) => ring.nodes.map((n) => ({ ...n, ring: ring.key })));
+const TALENT_BY_ID = Object.fromEntries(TALENT_NODES.map((n) => [n.id, n]));
+
+/* ------------------------------------------------------------------ *
+ * 稀有度与骰面
+ *
+ * 骰子面上的点数就是稀有度，面的颜色就是稀有度色。落定那一刻不用读文字
+ * 就知道中了什么。面出现的概率不均匀（1 面 34% 而 6 面 0.5%）——
+ * 这叫灌铅，是唯一能同时满足"权重精确"和"骰子直觉"的做法。
+ * ------------------------------------------------------------------ */
+const RARITY = [
+  { key: 'common', name: '常见', weight: 60, color: '#c8ccd4', faces: [1, 2], faceWeights: [34, 26] },
+  { key: 'fine', name: '优良', weight: 25, color: '#7ddc8a', faces: [3], faceWeights: [25] },
+  { key: 'rare', name: '稀有', weight: 11, color: '#6bb8ff', faces: [4], faceWeights: [11] },
+  { key: 'epic', name: '史诗', weight: 3.5, color: '#c58cff', faces: [5], faceWeights: [3.5] },
+  { key: 'legend', name: '传说', weight: 0.5, color: '#ffd76b', faces: [6], faceWeights: [0.5] },
+];
+
+const RARITY_BY_KEY = Object.fromEntries(RARITY.map((r) => [r.key, r]));
+const FACE_WEIGHTS = RARITY.flatMap((r) => r.faces.map((face, i) => ({ face, rarity: r.key, w: r.faceWeights[i] })));
+
+/* ------------------------------------------------------------------ *
+ * 突变池
+ *
+ * 四类，占比决定抽到哪一类。稀有度只决定"效果量级"，
+ * 类别决定"改的是数值、部位、元素还是形态"。
+ * ------------------------------------------------------------------ */
+const CATEGORY_SHARE = { stat: 55, part: 30, element: 12, trait: 3 };
+
+const MUTATIONS = [
+  /* 属性突变 —— 四项强化的等效免费加成 */
+  { id: 'm_power', name: '力量增生', cat: 'stat', rarity: 'common', desc: '力量 +1 级', apply: (d) => { d.levels.power += 1; } },
+  { id: 'm_atomic', name: '炉心膨胀', cat: 'stat', rarity: 'common', desc: '炉心 +1 级', apply: (d) => { d.levels.atomic += 1; } },
+  { id: 'm_metab', name: '代谢加速', cat: 'stat', rarity: 'common', desc: '代谢 +1 级', apply: (d) => { d.levels.metabolism += 1; } },
+  { id: 'm_stride', name: '步幅拓宽', cat: 'stat', rarity: 'common', desc: '动能 +1 级', apply: (d) => { d.levels.stride += 1; } },
+  { id: 'm_twin', name: '双生强化', cat: 'stat', rarity: 'fine', desc: '随机两项强化各 +1', apply: (d, rng) => { const ks = Object.keys(d.levels); const a = ks[Math.floor(rng() * ks.length)]; let b = a; while (b === a) b = ks[Math.floor(rng() * ks.length)]; d.levels[a] += 1; d.levels[b] += 1; } },
+  { id: 'm_surge', name: '核能过载', cat: 'stat', rarity: 'rare', desc: '四项强化各 +1', apply: (d) => { for (const k in d.levels) d.levels[k] += 1; } },
+  { id: 'm_apex', name: '巅峰体质', cat: 'stat', rarity: 'epic', desc: '四项强化各 +2', apply: (d) => { for (const k in d.levels) d.levels[k] += 2; } },
+
+  /* 部位突变 —— 绑定一个骨骼部件，同时给数值和外观 */
+  { id: 'p_spike1', name: '脊刺增生', cat: 'part', part: 'spikes', rarity: 'common', desc: '背刺 +2 根，重踏范围 +5%', apply: (d) => { d.morph.spikes += 2; d.morph.stompBoost = (d.morph.stompBoost || 0) + 0.05; } },
+  { id: 'p_spike2', name: '脊刺加长', cat: 'part', part: 'spikes', rarity: 'fine', desc: '背刺高度 +20%，重踏范围 +8%', apply: (d) => { d.morph.spikeScale = (d.morph.spikeScale || 1) * 1.2; d.morph.stompBoost = (d.morph.stompBoost || 0) + 0.08; } },
+  { id: 'p_tail', name: '尾节增生', cat: 'part', part: 'tail_mid', rarity: 'common', desc: '尾节 +1，尾扫范围 +6%', apply: (d) => { d.morph.tailSegs += 1; d.morph.tailBoost = (d.morph.tailBoost || 0) + 0.06; } },
+  { id: 'p_tailtip', name: '尾尖硬化', cat: 'part', part: 'tail_tip', rarity: 'rare', desc: '尾尖变锤状，尾扫击退 +30%', apply: (d) => { d.morph.tailTip = 'hammer'; d.morph.tailBoost = (d.morph.tailBoost || 0) + 0.15; } },
+  { id: 'p_claw', name: '爪裂增生', cat: 'part', part: 'forearm', rarity: 'fine', desc: '爪 +1 根，爪击伤害 +8%', apply: (d) => { d.morph.claws += 1; d.morph.clawBoost = (d.morph.clawBoost || 0) + 0.08; } },
+  { id: 'p_jaw', name: '獠牙外翻', cat: 'part', part: 'jaw', rarity: 'common', desc: '撕咬范围 +10%', apply: (d) => { d.morph.jawBoost = (d.morph.jawBoost || 0) + 0.1; } },
+  { id: 'p_horn', name: '头角萌生', cat: 'part', part: 'head', rarity: 'rare', desc: '头顶 +1 根角，吐息伤害 +6%', apply: (d) => { d.morph.horns += 1; d.morph.beamBoost = (d.morph.beamBoost || 0) + 0.06; } },
+  { id: 'p_bulk', name: '躯干臃肿', cat: 'part', part: 'torso', rarity: 'common', desc: '体型 +1.5%，抗压制 +5%', apply: (d) => { d.morph.extraScale += 0.015; d.morph.pressResist = (d.morph.pressResist || 0) + 0.05; } },
+  { id: 'p_thigh', name: '腿肌隆起', cat: 'part', part: 'thigh', rarity: 'common', desc: '行进速度 +4%', apply: (d) => { d.morph.speedBoost = (d.morph.speedBoost || 0) + 0.04; } },
+  { id: 'p_scale', name: '鳞甲加厚', cat: 'part', part: 'torso', rarity: 'fine', desc: '受击闪光 -20%，鳞片分块 +1', apply: (d) => { d.morph.plates += 1; d.morph.hitFlash = Math.max(0, (d.morph.hitFlash ?? 1) - 0.2); } },
+  { id: 'p_lidless', name: '无睑之眼', cat: 'part', part: 'head', rarity: 'rare', desc: '眼部发红光，暴击 +8%', apply: (d) => { d.morph.eyeGlow = true; d.morph.crit = (d.morph.crit || 0) + 0.08; } },
+  { id: 'p_twin_tail', name: '双尾', cat: 'part', part: 'tail_base', rarity: 'epic', desc: '尾节 +2，尾扫范围 +25%', apply: (d) => { d.morph.tailSegs += 2; d.morph.tailBoost = (d.morph.tailBoost || 0) + 0.25; d.morph.twinTail = true; } },
+
+  /* 元素突变 —— 给副特效，不改主色 */
+  { id: 'e_spark', name: '鳞片导电', cat: 'element', rarity: 'fine', desc: '获得「苍雷」副特效', apply: (d) => { addSub(d, 'volt'); } },
+  { id: 'e_ember', name: '鳞片蓄热', cat: 'element', rarity: 'fine', desc: '获得「赤焰」副特效', apply: (d) => { addSub(d, 'pyro'); } },
+  { id: 'e_frost', name: '霜纹蔓延', cat: 'element', rarity: 'fine', desc: '获得「冰棘」副特效', apply: (d) => { addSub(d, 'cryo'); } },
+  { id: 'e_glow', name: '辐射辉光', cat: 'element', rarity: 'rare', desc: '体表常驻辉光，核能 +10%', apply: (d) => { d.morph.aura = true; d.morph.energyBoost = (d.morph.energyBoost || 0) + 0.1; } },
+
+  /* 质变突变 —— 改形态，最稀有的那档 */
+  { id: 't_crimson', name: '赤化', cat: 'trait', rarity: 'legend', desc: '体色整体转红，所有伤害 +12%', apply: (d) => { d.morph.hue = 'crimson'; d.morph.dmgBoost = (d.morph.dmgBoost || 0) + 0.12; } },
+  { id: 't_albino', name: '白化', cat: 'trait', rarity: 'legend', desc: '体色转苍白，吐息 +25%，近战 -10%', apply: (d) => { d.morph.hue = 'albino'; d.morph.beamBoost = (d.morph.beamBoost || 0) + 0.25; d.morph.meleePenalty = 0.1; } },
+  { id: 't_colossal', name: '巨躯化', cat: 'trait', rarity: 'legend', desc: '体型 +12%，全部判定范围同步放大', apply: (d) => { d.morph.extraScale += 0.12; d.morph.colossal = (d.morph.colossal || 0) + 1; } },
+  { id: 't_elemental', name: '元素化身', cat: 'trait', rarity: 'legend', desc: '主元素伤害 +40%，体表常驻元素粒子', apply: (d) => { d.morph.elemental = true; d.morph.elementBoost = 0.4; } },
+  { id: 't_third_eye', name: '第三只眼', cat: 'trait', rarity: 'epic', desc: '头部新增发光眼，暴击 +10%', apply: (d) => { d.morph.thirdEye = true; d.morph.crit = (d.morph.crit || 0) + 0.1; } },
+];
+
+const MUTATION_BY_ID = Object.fromEntries(MUTATIONS.map((m) => [m.id, m]));
+
+function addSub(d, key) {
+  if (!Array.isArray(d.subElements)) d.subElements = [];
+  if (!d.subElements.includes(key)) d.subElements.push(key);
+}
+
+/* ------------------------------------------------------------------ *
+ * 确定性随机（铁律：外观绝不交给 Math.random）
+ * ------------------------------------------------------------------ */
+function hashSeed(seed, level) {
+  let h = 2166136261 ^ (seed | 0);
+  h = Math.imul(h ^ (level | 0), 16777619);
+  return h >>> 0;
+}
+
+function mulberry32(a) {
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* 天气只做加权，不改判定本身。weather 为 null 时全部系数取 1 ——
+ * 本次只做成长，05-天气系统.md 落地后把真实的 weather 传进来即可。 */
+const WEATHER_RARITY_BOOST = { bloodmoon: 1.3, silent: 1.5 };
+const WEATHER_CAT_BIAS = { storm: { element: 1.5 }, bloodmoon: { trait: 1.4 } };
+
+/* 返回按稀有度分组的权重表 [{key, w}]，合计总是 100。
+ * 天气加成把「从常见面挪给高阶面」：高阶权重乘系数，常见权重吸收差额。 */
+function rarityTableFor(weather) {
+  const boost = weather && WEATHER_RARITY_BOOST[weather] ? WEATHER_RARITY_BOOST[weather] : 1;
+  if (boost === 1) return RARITY.map((r) => ({ key: r.key, w: r.weight }));
+
+  const base = RARITY.map((r) => r.weight);
+  const hi = base.map((w, i) => (i === 0 ? w : w * boost));
+  const hiTotal = hi.reduce((a, b) => a + b, 0);
+  // 常见权重 = 100 - 高阶合计，保持总和不变
+  const common = Math.max(0, 100 - (hiTotal - base[0]));
+  return RARITY.map((r, i) => ({ key: r.key, w: i === 0 ? common : hi[i] }));
+}
+
+function pickWeighted(rng, items, weightOf) {
+  const total = items.reduce((a, it) => a + weightOf(it), 0);
+  let roll = rng() * total;
+  for (const it of items) {
+    roll -= weightOf(it);
+    if (roll <= 0) return it;
+  }
+  return items[items.length - 1];
+}
+
+function pickCategory(rng, weather) {
+  const bias = weather && WEATHER_CAT_BIAS[weather] ? WEATHER_CAT_BIAS[weather] : null;
+  const cats = Object.keys(CATEGORY_SHARE);
+  return pickWeighted(rng, cats, (c) => CATEGORY_SHARE[c] * (bias && bias[c] ? bias[c] : 1));
+}
+
+/* 抽一个突变。同一个 seed + level 永远得到同一个结果 —— 骰子动画不参与计算，
+ * 它只是落在那个已经算好的面上。
+ *
+ * 两步：先按稀有度权重定稀有度，再在该稀有度的全部突变里按类别权重抽一个。
+ * 类别和稀有度不是独立的（比如常见稀有度只有属性类突变），
+ * 所以必须先定稀有度、再在它内部按类别挑，否则会出现不存在的组合。 */
+function mutateFor(seed, level, weather, rarityOverride) {
+  const rng = mulberry32(hashSeed(seed, level));
+  const table = rarityOverride || rarityTableFor(weather);
+  const rk = pickWeighted(rng, table, (row) => row.w).key;
+
+  const pool = MUTATIONS.filter((m) => m.rarity === rk);
+  const cat = pickCategory(rng, weather);
+  const inCat = pool.filter((m) => m.cat === cat);
+  const chosen = (inCat.length ? inCat : pool);
+  const picked = chosen[Math.floor(rng() * chosen.length)];
+
+  const face = RARITY_BY_KEY[picked.rarity].faces[0];
+  return { ...picked, face, rarityInfo: RARITY_BY_KEY[picked.rarity] };
+}
+
+/* ------------------------------------------------------------------ *
+ * 经验收益的区域缩放（06 §2.2）
+ *
+ * 这是前置修复：没有它，区域 10 以后升级会慢到几乎停滞，
+ * 而"一章 5 关"的节拍要求大致每 3 个区域升一级。
+ * ------------------------------------------------------------------ */
+const Ke = (d) => 1 + (d - 1) * 0.19;      // 敌人经验系数
+const Kb = (d) => 1 + (d - 1) * 0.22;      // 建筑经验系数
+const xpPerEnemy = (d) => Math.round(12 * Ke(d));
+const xpPerBuilding = (d, layer) => Math.round((layer === 1 ? 24 : 12) * Kb(d));
+const xpPerDistrict = (d) => Math.round(60 * Ke(d));
+
+/* ------------------------------------------------------------------ *
+ * 体征期：每 25 级一个质变台阶，不单独存储，由 level 推导
+ * ------------------------------------------------------------------ */
+const EPOCHS = [
+  { name: '幼兽', min: 1, scale: [1.00, 1.15], color: '#2f4d3a', spikes: 3 },
+  { name: '亚成体', min: 25, scale: [1.16, 1.32], color: '#38573f', spikes: 5, fork: true },
+  { name: '成体', min: 50, scale: [1.33, 1.49], color: '#4a5a3c', spikes: 6, fork: true, elemental: true },
+  { name: '完全体', min: 75, scale: [1.50, 1.65], color: '#6b5436', spikes: 7, fork: true, elemental: true, texture: true },
+  { name: '灾厄体', min: 100, scale: [1.66, 1.80], color: '#7a4a2c', spikes: 9, fork: true, elemental: true, texture: true, aura: true },
+];
+
+const epochIndexFor = (level) => {
+  let i = 0;
+  for (let k = 0; k < EPOCHS.length; k++) if (level >= EPOCHS[k].min) i = k;
+  return i;
+};
+
+/* 体型缩放。锚点是脚底（见 rig.js），上限 1.80 是硬约束：
+ * 再大就会盖住页眉或底部新闻条。 */
+function globalScaleFor(level, talents, morph) {
+  const t = talents || {};
+  const m = morph || {};
+  const raw = 1
+    + 0.005 * (level - 1)
+    + 0.02 * (t.mass || 0)
+    + 0.03 * (t.magma || 0)
+    + 0.03 * epochIndexFor(level)
+    + 0.015 * (m.colossal || 0)
+    + (m.extraScale || 0);
+  return Math.min(1.80, Math.max(1.00, raw));
+}
+
+/* ------------------------------------------------------------------ *
+ * 存档
+ * ------------------------------------------------------------------ */
+const MUTATION_SHAPE = () => ({
+  spikes: 0, spikeScale: 1, tailSegs: 0, tailTip: null, claws: 0, horns: 0,
+  plates: 0, eyeGlow: false, thirdEye: false, aura: false, twinTail: false,
+  hue: null, elemental: false, colossal: 0, extraScale: 0,
+});
+
+const defaults = () => ({
+  version: 4,
+  energy: 180, earned: 0, xp: 0, level: 1, dna: 0,
+  district: 1, cleared: 0, kills: 0, meters: 0,
+  levels: { power: 1, atomic: 1, metabolism: 1, stride: 1 },
+  skills: [],
+  auto: true, policy: 'balanced', muted: true,
+  lastSeen: Date.now(), world: null,
+  // —— 本次新增 ——
+  talent: 0,               // 天赋点余额
+  talents: {},             // { id: level }
+  assign: 0,               // 可用加点机会
+  evoRolls: 0,             // 可用进化机会
+  mutations: [],           // 已获得突变 id，按获得顺序
+  seed: 0,                 // 突变种子，生成一次后永久固定
+  rerolls: 0,              // 已用重掷次数，用于定价
+  morph: MUTATION_SHAPE(), // 外观快照（见 06 §5.4：可以推演，但必须落盘）
+  talentResets: 0,         // 天赋重置次数，用于定价
+  subElements: [],         // 副元素（不改主色）
+});
+
+const finite = (v, d, min = 0, max = 1e15) => (Number.isFinite(+v) ? Math.min(max, Math.max(min, +v)) : d);
+
+/* ⚠️ 这里是最容易犯致命错误的地方。
+ *
+ * 只把版本号改成 4 就等于把所有旧档判废、回落成 1 级 —— 玩家几个月的进度
+ * 一次性归零，而且不会报任何错。所以 3 和 4 都必须认，认了之后就地补齐新字段。
+ *
+ * seed 的派生也必须确定性：用旧档里已有的、当时就稳定的字段算，
+ * 绝不能用 Date.now() 或 Math.random()。 */
+function sanitize(raw) {
+  const a = defaults();
+  if (!raw || (raw.version !== 3 && raw.version !== 4)) return a;
+
+  for (const k of ['energy', 'earned', 'xp', 'level', 'dna', 'district', 'cleared', 'kills', 'meters']) {
+    a[k] = finite(raw[k], a[k], (k === 'level' || k === 'district') ? 1 : 0);
+  }
+  a.level = Math.floor(a.level);
+  a.district = Math.floor(a.district);
+  a.dna = Math.floor(a.dna);
+
+  for (const k in STATS) a.levels[k] = Math.floor(finite(raw.levels && raw.levels[k], 1, 1, 500));
+
+  a.skills = SKILLS.filter((s) => Array.isArray(raw.skills) && raw.skills.includes(s.id)).map((s) => s.id);
+  a.auto = raw.auto !== false;
+  a.policy = ['balanced', 'kinetic', 'atomic', 'evolution'].includes(raw.policy) ? raw.policy : 'balanced';
+  a.muted = raw.muted !== false;
+  a.lastSeen = finite(raw.lastSeen, Date.now(), 0, Date.now());
+  a.world = raw.world && typeof raw.world === 'object' ? raw.world : null;
+
+  // —— 新增字段：老档没有就补默认值，有就钳制 ——
+  a.talent = Math.floor(finite(raw.talent, 0, 0, 1e9));
+  a.assign = Math.floor(finite(raw.assign, 0, 0, 1e9));
+  a.evoRolls = Math.floor(finite(raw.evoRolls, 0, 0, 1e9));
+  a.rerolls = Math.floor(finite(raw.rerolls, 0, 0, 1e9));
+  a.talentResets = Math.floor(finite(raw.talentResets, 0, 0, 1e9));
+
+  a.talents = {};
+  if (raw.talents && typeof raw.talents === 'object') {
+    for (const id in raw.talents) {
+      if (TALENT_BY_ID[id]) a.talents[id] = Math.floor(finite(raw.talents[id], 0, 0, 3));
+    }
+  }
+
+  a.mutations = Array.isArray(raw.mutations) ? raw.mutations.filter((id) => !!MUTATION_BY_ID[id]) : [];
+
+  // seed 只在此刻派生一次；派生后立即被调用方落盘，之后永远从存档读
+  const derived = hashSeed(a.cleared * 7919 + a.kills * 104729 + Math.round(a.meters), a.level);
+  a.seed = finite(raw.seed, derived, 0, 4294967295) >>> 0;
+  if (!a.seed) a.seed = derived;
+
+  a.subElements = Array.isArray(raw.subElements)
+    ? raw.subElements.filter((k) => TALENT_BY_ID[k] && TALENT_BY_ID[k].ring === 'element')
+    : [];
+
+  // 外观快照：老档没有就按空的推一遍
+  a.morph = { ...MUTATION_SHAPE(), ...(raw.morph && typeof raw.morph === 'object' ? raw.morph : {}) };
+  a.morph.plates = Math.floor(finite(a.morph.plates, 0, 0, 9));
+  a.morph.spikes = Math.floor(finite(a.morph.spikes, 0, 0, 60));
+  a.morph.spikeScale = finite(a.morph.spikeScale, 1, 1, 1.6);
+  a.morph.tailSegs = Math.floor(finite(a.morph.tailSegs, 0, 0, 9));
+  a.morph.claws = Math.floor(finite(a.morph.claws, 0, 0, 9));
+  a.morph.horns = Math.floor(finite(a.morph.horns, 0, 0, 9));
+
+  return a;
+}
+
+/* ------------------------------------------------------------------ *
+ * Economy
+ * ------------------------------------------------------------------ */
+class Economy {
+  constructor(raw) {
+    this.data = sanitize(raw);
+    this.autoClock = 0;
+    this.events = [];
+  }
+
+  has(id) { return this.data.skills.includes(id); }
+  mult() { return 1 + (this.data.level - 1) * 0.07; }
+  passive() { return (2.5 + this.data.levels.metabolism * 1.4) * this.mult() * (this.has('harvest') ? 1.25 : 1) * (1 + (this.data.morph.energyBoost || 0)); }
+  rewardMult() { return (1 + (this.data.levels.metabolism - 1) * 0.12) * (this.has('harvest') ? 1.25 : 1); }
+  power() { return (54 + this.data.levels.power * 22) * this.mult() * (1 + (this.data.morph.dmgBoost || 0)); }
+  atomic() { return (85 + this.data.levels.atomic * 30) * this.mult() * (1 + (this.data.morph.beamBoost || 0)); }
+  speed() { return (30 + Math.sqrt(this.data.levels.stride) * 8) * (1 + (this.data.morph.speedBoost || 0)); }
+  nextXP() { return Math.round(260 * Math.pow(this.data.level, 1.28)); }
+  cost(key) { return Math.round(STATS[key].base * Math.pow(1.22, this.data.levels[key] - 1)); }
+
+  /* —— 体征期与体型 —— */
+  epochIndex() { return epochIndexFor(this.data.level); }
+  epoch() { return EPOCHS[this.epochIndex()]; }
+  globalScale() { return globalScaleFor(this.data.level, this.data.talents, this.data.morph); }
+
+  /* 升级：+1 dna、+1 加点机会、+1 进化机会；每 3 级再 +1 天赋点。
+   * 全部发放在这里，与 dna 同一处 —— 散到各处迟早漏一个。 */
+  gain(n, xp = 0) {
+    const d = this.data;
+    d.energy += n; d.earned += n; d.xp += xp;
+    let guard = 0;
+    while (d.xp >= this.nextXP() && guard++ < 100) {
+      d.xp -= this.nextXP();
+      d.level++;
+      d.dna++;
+      d.assign++;
+      d.evoRolls++;
+      if (d.level % 3 === 0) d.talent++;
+      if (d.level === 25 || d.level === 50 || d.level === 75 || d.level === 100) d.evoRolls++;
+      this.events.push({ type: 'evolution', level: d.level, epoch: this.epochIndex() });
+    }
+  }
+
+  upgrade(key) {
+    if (!STATS[key] || this.data.levels[key] >= 500) return false;
+    const cost = this.cost(key);
+    if (this.data.energy < cost) return false;
+    this.data.energy -= cost;
+    this.data.levels[key]++;
+    this.events.push({ type: 'upgrade', key, level: this.data.levels[key] });
+    return true;
+  }
+
+  /* 加点：花一次白给的机会，不看核能。这是"升级这个动作终于有了直接产出"。
+   * 与 upgrade() 分工清楚：加点保底，核能加速。 */
+  assignPoint(key) {
+    if (!STATS[key] || this.data.assign <= 0 || this.data.levels[key] >= 500) return false;
+    this.data.assign--;
+    this.data.levels[key]++;
+    this.events.push({ type: 'assign', key, level: this.data.levels[key] });
+    return true;
+  }
+
+  /* 一键均分：价格最低优先 —— 和 chooseUpgrade() 的思路一致，
+   * 把机会用在最便宜的地方，边际收益最大。 */
+  assignSpread() {
+    let used = 0;
+    while (this.data.assign > 0) {
+      const order = Object.keys(STATS).sort((a, b) => this.cost(a) - this.cost(b));
+      let moved = false;
+      for (const k of order) if (this.assignPoint(k)) { used++; moved = true; break; }
+      if (!moved) break;
+    }
+    return used;
+  }
+
+  unlock(id) {
+    const s = SKILLS.find((x) => x.id === id);
+    if (!s || this.has(id) || this.data.dna < s.cost || (s.requires && !this.has(s.requires))) return false;
+    this.data.dna -= s.cost;
+    this.data.skills.push(id);
+    this.events.push({ type: 'skill', id });
+    return true;
+  }
+
+  chooseUpgrade() {
+    const d = this.data;
+    const priority = d.policy === 'kinetic' ? ['power', 'stride', 'atomic', 'metabolism']
+      : d.policy === 'atomic' ? ['atomic', 'metabolism', 'power', 'stride']
+      : d.policy === 'evolution' ? ['metabolism', 'stride', 'power', 'atomic']
+      : ['power', 'atomic', 'metabolism', 'stride'];
+    return priority.map((k, i) => ({ k, weight: this.cost(k) * (d.policy === 'balanced' ? 1 : i === 0 ? 0.55 : i === 1 ? 0.85 : 1.3) }))
+      .sort((a, b) => a.weight - b.weight)[0].k;
+  }
+
+  autoSpend() {
+    const d = this.data;
+    if (d.auto) {
+      for (let i = 0; i < 4; i++) { if (!this.upgrade(this.chooseUpgrade())) break; }
+      const policy = d.policy;
+      const choices = SKILLS.filter((s) => !this.has(s.id) && (!s.requires || this.has(s.requires)))
+        .sort((a, b) => (policy === a.branch ? -10 : 0) + a.cost - ((policy === b.branch ? -10 : 0) + b.cost));
+      for (const s of choices) if (this.unlock(s.id)) break;
+    }
+    // 加点机会不自动花：那是留给玩家"回来点一下"的仪式感，也是面板角标
+    // 把他拉回来的理由。但进化机会是纯被动收益、不打断观看，自动掷掉 ——
+    // 这是"玩家不点也能一直前进"的保证，但会累积的加点机会仍会留着当角标。
+    if (d.auto && d.evoRolls > 0) while (d.evoRolls > 0) this.rollEvolution();
+  }
+
+  tick(dt) {
+    this.gain(this.passive() * dt);
+    this.autoClock += dt;
+    if (this.autoClock >= 3) { this.autoClock %= 3; this.autoSpend(); }
+  }
+
+  /* —— 天赋 —— */
+  ringInvested(ringKey) {
+    const ring = TALENT_RINGS.find((r) => r.key === ringKey);
+    if (!ring) return 0;
+    return ring.nodes.reduce((sum, n) => sum + (this.data.talents[n.id] || 0), 0);
+  }
+
+  /* 环的开启门槛：上一环累计投入够数才开。第 1 环永远开。 */
+  ringUnlocked(ringKey) {
+    const idx = TALENT_RINGS.findIndex((r) => r.key === ringKey);
+    if (idx <= 0) return true;
+    return this.ringInvested(TALENT_RINGS[idx - 1].key) >= RING_GATE[idx];
+  }
+
+  talentUpgrade(id) {
+    const node = TALENT_BY_ID[id];
+    if (!node) return false;
+    if (!this.ringUnlocked(node.ring)) return false;
+    const cur = this.data.talents[id] || 0;
+    if (cur >= 3 || this.data.talent <= 0) return false;
+    this.data.talent--;
+    this.data.talents[id] = cur + 1;
+    this.events.push({ type: 'talent', id, level: cur + 1 });
+    return true;
+  }
+
+  /* 主元素：元素环里第一个点满 3 级的节点。之后其他元素节点仍可点，
+   * 只给副特效、不改主色 —— 这是整套设计里最重要的那个外观开关。 */
+  mainElement() {
+    for (const id of Object.keys(this.data.talents)) {
+      const node = TALENT_BY_ID[id];
+      if (node && node.ring === 'element' && this.data.talents[id] >= 3) return id;
+    }
+    return null;
+  }
+
+  talentResetCost() {
+    return this.data.talentResets === 0 ? 0 : Math.round(2000 * Math.pow(1.8, this.data.talentResets));
+  }
+
+  talentReset() {
+    const cost = this.talentResetCost();
+    if (this.data.energy < cost) return false;
+    this.data.energy -= cost;
+    this.data.talentResets++;
+    let refunded = 0;
+    for (const id in this.data.talents) { refunded += this.data.talents[id]; delete this.data.talents[id]; }
+    this.data.talent += refunded;
+    this.events.push({ type: 'talentReset', refunded });
+    return true;
+  }
+
+  /* —— 随机突变 —— */
+  rerollCost() { return Math.round(5000 * Math.pow(1.6, this.data.rerolls)); }
+
+  /* 抽一次并用掉一次机会。结果由 seed + level 确定性派生，
+   * 骰子动画不参与计算 —— 它只是落在那个已经算好的面上。 */
+  rollEvolution(weather) {
+    const d = this.data;
+    if (d.evoRolls <= 0) return null;
+
+    // 同一级重掷要换一个结果，所以把「已抽过的次数」混进种子，
+    // 但仍然只依赖确定性输入，不用 Math.random。
+    const attempt = d.mutations.length;
+    const seed = (d.seed ^ Math.imul(attempt + 1, 2654435761)) >>> 0;
+    const picked = mutateFor(seed, d.level, weather || null);
+    const rng = mulberry32(hashSeed(seed, d.level));
+
+    d.evoRolls--;
+    picked.apply(d, rng);
+    d.mutations.push(picked.id);
+    // 关键约束：先落盘再播动画。动画途中关面板，结果也已经在存档里
+    this.events.push({ type: 'mutation', id: picked.id, rarity: picked.rarity, level: d.level });
+
+    return {
+      mutationId: picked.id, name: picked.name, desc: picked.desc,
+      rarity: picked.rarity, rarityName: picked.rarityInfo.name,
+      color: picked.rarityInfo.color, face: picked.face, part: picked.part || null,
+      level: d.level,
+    };
+  }
+
+  /* 最近 N 条进化记录，给面板的「最近进化」用。
+   * 只反查 id → 突变定义，不重算随机。 */
+  recentMutations(n = 20) {
+    return this.data.mutations.slice(-n).reverse().map((id) => {
+      const m = MUTATION_BY_ID[id];
+      return m ? { id, name: m.name, desc: m.desc, rarity: m.rarity, rarityName: RARITY_BY_KEY[m.rarity].name, color: RARITY_BY_KEY[m.rarity].color, face: RARITY_BY_KEY[m.rarity].faces[0] } : null;
+    }).filter(Boolean);
+  }
+
+  offline(now) {
+    const seconds = Math.min(8 * 3600, Math.max(0, (now - this.data.lastSeen) / 1000));
+    this.data.lastSeen = now;
+    if (seconds < 10) return null;
+    let efficiency = this.has('overdrive') ? 0.9 : 0.65;
+    // 无眠：离线效率 +5%/级，与原始觉醒的 90% 对齐，封顶 100%
+    efficiency = Math.min(1, efficiency + 0.05 * (this.data.talents.sleepless || 0));
+    const rate = this.passive() + 7 * this.rewardMult();
+    const amount = seconds * rate * efficiency;
+    this.gain(amount);
+    return { seconds, amount, efficiency, capped: seconds >= 8 * 3600 };
+  }
+
+  serialize(now, world) {
+    this.data.lastSeen = now;
+    if (world) this.data.world = world;
+    return JSON.stringify(this.data);
+  }
+}
+
+const api = {
+  Economy, STATS, SKILLS, defaults, sanitize,
+  TALENT_RINGS, TALENT_NODES, TALENT_BY_ID, RING_GATE,
+  MUTATIONS, MUTATION_BY_ID, RARITY, RARITY_BY_KEY, FACE_WEIGHTS, CATEGORY_SHARE,
+  EPOCHS, epochIndexFor, globalScaleFor,
+  hashSeed, mulberry32, mutateFor, rarityTableFor,
+  Ke, Kb, xpPerEnemy, xpPerBuilding, xpPerDistrict,
+};
+
+if (typeof module !== 'undefined') module.exports = api;
+else root.IdleProgression = api;
+})(typeof window !== 'undefined' ? window : this);

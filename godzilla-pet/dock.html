@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>巨兽都市 · 控制</title>
+<style>
+  /* 大颗粒像素风。所有描边都是整数像素、所有阴影都不带模糊 ——
+   * 一旦用了 blur 或半像素，颗粒感立刻消失，看起来就变成"现代 UI 缩了个影"。
+
+   * 这个按钮住在独立窗口里，不经过电视画面那道 0.46 倍的缩放，
+   * 所以它有多大就是多大。这是把它从画面里搬出来的全部理由。 */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    background: transparent;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: pointer;
+  }
+
+  #dock {
+    /* 按钮本体 88px，右下 8px 硬阴影画在窗口余出的那 8px 里，窗口正好 96 见方 */
+    width: 88px;
+    height: 88px;
+    display: block;
+    background: #152b43;
+    border: 5px solid #6d93aa;
+    /* 右下角压暗成 5px 硬边，左上角提亮 —— 老式像素按钮的斜角 */
+    border-bottom-color: #24405a;
+    border-right-color: #24405a;
+    box-shadow: 8px 8px 0 #06101f;
+    position: relative;
+    image-rendering: pixelated;
+    /* button 元素自带 cursor:default，会盖掉 body 上那条，必须单独写在它身上 */
+    cursor: pointer;
+    padding: 0;
+  }
+
+  /* 内层再描一圈，像素 UI 里那圈"凹陷" */
+  #dock::before {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    border: 3px solid #0d1d2e;
+  }
+
+  #dock:hover { background: #245069; border-color: #a8cfe0; border-bottom-color: #2f5a78; border-right-color: #2f5a78; }
+  #dock:active { transform: translate(6px, 6px); box-shadow: 2px 2px 0 #06101f; }
+  #dock:focus { outline: none; }
+  #dock:focus-visible::after {
+    content: '';
+    position: absolute;
+    inset: -12px;
+    border: 2px dashed #9decef;
+  }
+
+  svg { position: absolute; inset: 0; margin: auto; display: block; }
+</style>
+</head>
+<body>
+
+<!-- 三横杠。画在 6×5 的栅格上再整数倍放大（每格 9px），每一格都是实心正方形，
+     这样放大后边缘依然是刀切的方块，不会出现半像素的灰边。 -->
+<button id="dock" title="巨兽观测 · 强化 / 技能树 / 档案 / 设置" aria-label="打开巨兽观测面板">
+  <svg width="54" height="45" viewBox="0 0 6 5" shape-rendering="crispEdges" aria-hidden="true">
+    <rect x="0" y="0" width="6" height="1" fill="#eeecd3"></rect>
+    <rect x="0" y="2" width="6" height="1" fill="#eeecd3"></rect>
+    <rect x="0" y="4" width="4" height="1" fill="#9decef"></rect>
+  </svg>
+</button>
+
+</body>
+</html>
