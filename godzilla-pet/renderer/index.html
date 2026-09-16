@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- 本地应用，一切资源都来自同一目录：不联网、不内联脚本、不加载远程字体 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
+<title>巨兽都市桌宠</title>
+<link rel="stylesheet" href="pet.css">
+</head>
+<body>
+<!-- 窗口整体透明，只有这块画布上真正画了像素的地方才可见 -->
+<canvas id="stage" width="240" height="300" aria-label="哥斯拉桌面宠物：自动拆楼并随等级长大"></canvas>
+
+<!-- 常驻角标：一眼看到等级与经验进度，不打扰桌面 -->
+<div id="badge" aria-hidden="true">
+  <span id="badgeLevel">LV 01</span>
+  <i id="badgeBar"><b></b></i>
+</div>
+
+<!-- 悬停展开的成长卡片，空闲时完全隐藏 -->
+<section id="hoverCard" hidden>
+  <header>
+    <div>
+      <span class="kicker" id="cardStageEn">HATCHLING</span>
+      <h1 id="cardStage">幼体</h1>
+    </div>
+    <b id="cardLevel">LV 01</b>
+  </header>
+  <p id="cardBlurb">刚孵化的小家伙，只能拍碎路边的平房。</p>
+  <div class="bar"><i id="cardBar"></i></div>
+  <dl>
+    <div><dt>经验</dt><dd id="cardXp">0 / 26</dd></div>
+    <div><dt>拆除</dt><dd id="cardWrecks">0</dd></div>
+    <div><dt>陪伴</dt><dd id="cardTime">0 分</dd></div>
+    <div><dt>下一阶段</dt><dd id="cardNext">LV 10</dd></div>
+  </dl>
+  <footer>拖动移动 · 点它互动 · 右键更多</footer>
+</section>
+
+<!-- 升级 / 阶段突破横幅 -->
+<div id="banner" hidden><b id="bannerTitle"></b><small id="bannerSub"></small></div>
+
+<!-- 离线收益回执 -->
+<div id="offline" hidden>
+  <b>离线观测已完成</b>
+  <p id="offlineText"></p>
+</div>
+
+<script src="growth.js"></script>
+<script src="part-bounds.js"></script>
+<script src="rig.js"></script>
+<script src="pet.js"></script>
+</body>
+</html>
