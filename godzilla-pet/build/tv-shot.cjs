@@ -74,10 +74,13 @@ async function runContract() {
   const mainZoom = main.webContents.getZoomFactor();
   const layout = w => execute(w, `JSON.stringify({width:innerWidth,height:innerHeight,boxes:['.shell','#playerFrame','#game'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height]})})`);
   const mainLayout = await layout(main);
-  await execute(main, "document.getElementById('open-talent').click()");
+  /* 侧栏入口现在只剩一个「遥控器」（id 仍是 open-assign）。原来并排的
+     天赋 / 变异两个按钮已按反馈从 index.html 移除，所以这里不再逐个入口点，
+     那两个页改为在面板内切页到达（见下面的 evoTab / talentTab）。 */
+  await execute(main, "document.getElementById('open-assign').click()");
   await waitFor(() => BrowserWindow.getAllWindows().length === 2, '副屏创建且没有旧 dock');
   const panel = BrowserWindow.getAllWindows().find(w => w !== main);
-  await waitFor(() => execute(panel, "!!window.__growth && document.getElementById('panelTitle').textContent==='天赋'"), '首次按入口选页');
+  await waitFor(() => execute(panel, "!!window.__growth && document.getElementById('panelTitle').textContent==='加点'"), '首次按入口选页');
   assert.equal(await execute(main, "document.getElementById('management').hidden"), true);
   assert.equal(await execute(main, "getComputedStyle(document.getElementById('management')).display"), 'none');
   assert.notEqual(main.webContents.session, panel.webContents.session, '主副屏会话必须隔离缩放');
@@ -96,8 +99,8 @@ async function runContract() {
   await execute(panel, "document.getElementById('talentTab').click();document.getElementById('talent-mass').click()");
   await waitFor(async () => (await snapshot(panel)).talents.mass === 1, '天赋同步');
   assert.equal((await snapshot(main)).talent, before.talent - 1);
-  await execute(main, "document.getElementById('open-evo').click()");
-  await waitFor(() => execute(panel, "document.getElementById('panelTitle').textContent==='进化'"), '进化入口');
+  await execute(panel, "document.getElementById('evoTab').click()");
+  await waitFor(() => execute(panel, "document.getElementById('panelTitle').textContent==='进化'"), '面板内切到进化页');
   const rolls = (await snapshot(main)).evoRolls;
   await execute(panel, "document.getElementById('rollEvo').click()");
   await waitFor(async () => (await snapshot(panel)).evoRolls === rolls - 1, '掷骰同步');
@@ -129,8 +132,10 @@ async function runContract() {
   fs.writeFileSync(OUT.replace(/\.png$/, '-panel.png'), (await panel.webContents.capturePage()).toPNG());
   await execute(panel, "document.getElementById('closePanel').click()");
   await waitFor(() => BrowserWindow.getAllWindows().length === 1, '只关闭副屏');
-  for (const tab of ['assign','talent','evo']) {
-    await execute(main, `document.getElementById('open-${tab}').click()`);
+  /* 侧栏只剩一个入口，所以"重复打开"就按同一个入口连开三轮 ——
+     验的仍是"复用同一扇副屏窗口、主屏版面纹丝不动"，不依赖入口个数。 */
+  for (let round = 1; round <= 3; round++) {
+    await execute(main, "document.getElementById('open-assign').click()");
     await waitFor(() => BrowserWindow.getAllWindows().length === 2, '重复打开副屏');
     const again = BrowserWindow.getAllWindows().find(w => w !== main);
     await waitFor(() => execute(again, '!!window.__growth'), '副屏重新就绪');

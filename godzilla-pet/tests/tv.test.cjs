@@ -545,3 +545,117 @@ test('存档桥：两个窗口都必须开着 contextIsolation，且桥只能经
   assert.match(readGame(), /try\{window\.__tvBridge\?\.register\(window\.__growth\);\}catch\{\}/,
     '画面没有把 __growth 交给桥，外壳的指令与面板同步会全部落空');
 });
+
+/* ==================================================================
+ * 2026-09-17 · 直播画面与侧栏的减法
+ *
+ * 这一组钉的不是"某个功能能不能用"，而是**别把删掉的东西加回来**。
+ * 每条都带着它的理由，理由不成立时应当先改这里，而不是悄悄绕过。
+ * ================================================================== */
+
+test('画面：常驻 HUD 已移除，且没有任何一处还在写它的元素', () => {
+  // 同上：注释剥掉再断言，注释里保留着"原来那排是什么"的说明
+  const html = fs.readFileSync(path.join(ROOT, 'tv', 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const game = readGame();
+
+  /* 那排 HUD（核能 / 等级 / 经验 / 天赋点 / 随机变异）压在直播画面上，
+   * 挡画面又和观测面板里的数字重复，2026-09-17 按反馈移除。
+   * 删元素不删赋值会当场抛在 $() 上，所以两件事必须一起钉。 */
+  const dead = ['hudEnergy', 'hudProd', 'hudLevel', 'hudXpFill', 'hudXpText', 'hudTalent', 'hudMutName', 'hudMutation'];
+  for (const id of dead) {
+    assert.ok(!html.includes(`id="${id}"`), `index.html 里 ${id} 又回来了（那排常驻 HUD 是故意移除的）`);
+    // 只认"赋值/取属性"这种代码形状，不全文找词：tv/game.js 里留了
+    // "为什么删掉"的说明，那段说明要长期保留，不该被当成违规证据。
+    assert.ok(!new RegExp(`\\$\\('${id}'\\)\\.`).test(game),
+      `tv/game.js 还在写 $('${id}') —— 元素已经不存在，会在下一次 hud() 里直接抛错`);
+  }
+  // 顺手钉住那一整排容器也走了，免得留一个空 .hud 在画面上当透明挡板
+  assert.ok(!/class="hud[ "]/i.test(html), 'index.html 里又出现了 .hud 容器');
+
+  // 角标**不在**移除之列：加点保留纯手动，未花点数必须在主界面上看得见。
+  assert.ok(html.includes('id="assignHudBadge"'), '未花加点数的角标被一起删掉了');
+  assert.ok(html.includes('class="hud-badge"'), '角标的样式类被一起删掉了');
+});
+
+test('画面：页眉页脚的四段状态文案已移除，但页脚元素必须留着', () => {
+  /* 先把 HTML 注释剥掉再断言：注释不渲染，也就不算"画面上的文字"。
+   * 这里必须这么做 —— 页脚旁边就留着一段说明"原来写的是什么、为什么去掉"，
+   * 那段说明是要长期保留的，不该被当成违规证据（同 TV_HIDE_DOCK_CSS 那条）。 */
+  const html = fs.readFileSync(path.join(ROOT, 'tv', 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+
+  for (const text of ['自动运行中', '近战优先', 'PIXEL BROADCAST', '巨兽都市 · 像素直播', '自动破坏 · 持续进化']) {
+    assert.ok(!html.includes(text), `电视周围的「${text}」又回来了（按反馈只留 GNN 台标）`);
+  }
+  assert.ok(/<div class="brand-mark"><b>GNN<\/b>/.test(html), 'GNN 台标应当保留');
+
+  /* 页脚现在是空的，但**元素不能删**：它的 38px 高 + 8px 外边距是
+   * .shell 宽度公式 calc((100dvh - 100px)*16/9) 里那个 100 的一部分
+   * （46 页眉 + 38 + 8 + 8），也是 tv-config.js 的 VIEWPORT 注释与
+   * 本文件 FOOTER_H 常量的依据。删掉元素，整只电视机在窗口里会上移
+   * 54px、上下各空一条。
+   *
+   * 变异测试：把 <footer></footer> 整个删掉，这条必须变红。 */
+  assert.match(html, /<footer><\/footer>/,
+    '页脚元素被删了 —— 它没有文字了，但它的高度是版面公式的输入，不能当空元素清掉');
+});
+
+test('侧栏：只剩一个入口，且名字是「遥控器」', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'tv', 'index.html'), 'utf8');
+  const menu = html.slice(html.indexOf('class="tv-menu"'), html.indexOf('</nav>'));
+  assert.ok(menu.length > 100, '在 index.html 里定位不到 .tv-menu，侧栏可能改结构了');
+
+  /* 天赋 / 变异两个按钮打开的就是观测面板里已经存在的两个页签，
+   * 一个面板给三条路是重复导航，2026-09-17 按反馈删掉。 */
+  assert.ok(!/id="open-talent"/.test(menu), '天赋按钮又回到侧栏了（它与观测面板里的天赋页重复）');
+  assert.ok(!/id="open-evo"/.test(menu), '变异按钮又回到侧栏了（同上）');
+
+  // 剩下那个入口改名成「遥控器」（功能本来就是打开怪兽面板）
+  assert.match(menu, /id="open-assign"[^>]*aria-label="遥控器"/, '入口的无障碍名还没改成「遥控器」');
+  assert.match(menu, />遥控器</, '入口上的可见文字还不是「遥控器」');
+
+  /* 删的是**侧栏入口**，不是页本身：面板里的加点 / 天赋 / 变异三个页签
+   * 必须原样保留，否则那两个面板就再也没有到达路径了。 */
+  for (const tab of ['id="assignTab"', 'id="talentTab"', 'id="evoTab"']) {
+    assert.ok(html.includes(tab), `观测面板里的 ${tab} 被一起删了 —— 这次只该删侧栏入口`);
+  }
+});
+
+/* 突发新闻的编排（反馈原文：「频率太高了，释放技能的时候不用出现，
+ * 一分钟左右出现一次差不多了」）。
+ *
+ * 行为级回归在 tv/tests/idle.cjs 里真跑（字幕条拉没拉、闸门衰减与重开、
+ * 被压下来的那条仍进档案）。这里钉的是源码形状：
+ *   - 重踏 / 长啸 / 吐息三条技能播报不许带 priority —— 行为测试只跑得到
+ *     吐息那一条路径，重踏与长啸得在这里兜住；
+ *   - 闸门必须真的接在 broadcast 上，且必须随时间衰减。 */
+test('突发新闻：技能释放不拉字幕条，其余事件至少隔一分钟一条', () => {
+  const game = readGame();
+  assert.match(game, /const BREAKING_GAP=60;/, '突发新闻的间隔常量不见了，或被改成了别的值');
+
+  // 在各自函数体里取调用形态，不全文找关键字（文件里有解释"技能为什么不
+  // 拉突发条"的注释，全文找词会把它误判成违规）。
+  const body = (from, to) => {
+    const s = game.indexOf(from);
+    assert.ok(s > 0, `在 tv/game.js 里定位不到 ${from}`);
+    const e = game.indexOf(to, s);
+    assert.ok(e > s, `在 tv/game.js 里定位不到 ${to}，${from} 的边界变了`);
+    return game.slice(s, e);
+  };
+  const cases = [
+    ['重踏', body('function doStomp()', 'function doRoar()')],
+    ['长啸', body('function doRoar()', 'function doTail()')],
+    ['吐息', body('function begin(name,target)', 'function targetForBeam()')],
+  ];
+  for (const [name, src] of cases) {
+    assert.match(src, /broadcast\(/, `${name}的播报整个不见了`);
+    assert.ok(!/broadcast\([^\n]*?,true\)/.test(src),
+      `${name}又把突发新闻条拉起来了 —— 技能几十秒一轮，每次都报等于让那条横幅常驻`);
+  }
+
+  assert.match(game, /if\(priority&&breakingCd>0\)priority=false;/,
+    'broadcast 没有把间隔内的突发新闻压成普通播报');
+  assert.match(game, /breakingCd=BREAKING_GAP;/,
+    '拉起字幕条时没有重置间隔，闸门形同虚设');
+  assert.match(game, /breakingCd=Math\.max\(0,breakingCd-dt\);/,
+    '间隔没有随时间衰减，第一条突发新闻之后再也不会拉横幅');
+});

@@ -11,7 +11,7 @@ let nodes=new Map(),listeners={},storage=new Map();let grad={addColorStop(){}};l
 class ImageMock{set src(v){this.complete=true;this.naturalWidth=300;this.naturalHeight=300;queueMicrotask(()=>this.onload?.());}}
 let randomSeed=76123;const testMath=Object.create(Math);testMath.random=()=>{randomSeed=(Math.imul(randomSeed,1664525)+1013904223)>>>0;return randomSeed/4294967296;};
 const window={IdleProgression:{Economy,STATS,SKILLS,TALENT_RINGS,TALENT_NODES,TALENT_BY_ID,RING_GATE,MUTATIONS,MUTATION_BY_ID,RARITY,RARITY_BY_KEY,FACE_WEIGHTS,EPOCHS,epochIndexFor,globalScaleFor,STAGES,stageIndexFor,hashSeed,mulberry32,mutateFor,rarityTableFor,Ke,Kb,xpPerEnemy,xpPerBuilding,xpPerDistrict,sanitize},KaijuRig:Rig,KaijuAssets:Assets,KaijuAppearance:Appearance,addEventListener:(k,f)=>listeners[k]=f};let sandbox={window,KaijuRig:{...Rig,Skeleton:class{constructor(){this.ready=true;}draw(){}}},KaijuAssets:Assets,KaijuAppearance:Appearance,console,Math:testMath,Set,Array,Map,Date,String,Number,Image:ImageMock,document:{getElementById:node,createElement:()=>node(Math.random()),hidden:false,addEventListener:(k,f)=>listeners[k]=f,body:{classList:{toggle(){}}}},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},performance:{now:()=>0},requestAnimationFrame(){},setTimeout(fn){fn();return 0;}};
-let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,worldSnapshot,get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
+let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,worldSnapshot,broadcast,get breakCd(){return breakingCd;},get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
 let main=api.state.buildings.find(b=>b.layer===1);assert(main.max>=780);api.damageBuilding(main,api.state.economy.power(),'claw');api.damageBuilding(main,api.state.economy.power(),'claw');assert(!main.dead&&main.hp>main.max*.7,'main building survives repeated initial claws');
 let currentSave=api.worldSnapshot(),ratio=main.hp/main.max,id=main.id;api.generateWorld(currentSave);assert(Math.abs(api.state.buildings.find(b=>b.id===id).hp/api.state.buildings.find(b=>b.id===id).max-ratio)<1e-9,'new save preserves damage ratio');
 api.generateWorld({district:1,x:420,buildings:[{id,hp:115,dead:false},{id:'1-1',hp:0,dead:true}]});main=api.state.buildings.find(b=>b.id===id);assert.equal(main.hp/main.max,.5,'legacy save retains half damaged condition');assert(api.state.buildings.find(b=>b.id==='1-1').dead,'legacy ruins stay destroyed');api.generateWorld();
@@ -43,3 +43,54 @@ sc.data.auto=autoWas;console.log('PASS frame timing: a 5s stall credits ~5s inst
 let a=s.enemies.find(x=>x.state==='alive');if(a){api.defeat(a,'claw');assert.equal(a.state,'flying');let oldKills=s.data.kills;api.defeat(a,'claw');assert.equal(s.data.kills,oldKills,'no duplicate kill reward');api.crash(a);assert.equal(a.state,'exploding');}console.log('PASS destruction: launch, crash transition and single reward');
 api.state.data.skills=[];api.begin('beam',api.state.enemies[0]);assert.equal(api.state.p.cooldowns.beam,28,'base beam cooldown 28 s');api.state.data.skills=['overdrive'];api.begin('beam',api.state.enemies[0]);assert.equal(api.state.p.cooldowns.beam,21,'evolved beam cooldown 21 s');api.generateWorld();api.state.p.x=500;api.state.p.cooldowns={beam:0,stomp:0,tail:0,roar:0};api.update(1/60);assert.equal(api.state.p.action.name,'stomp','nearby destruction takes priority over ready laser');console.log('PASS laser cooldown and melee priority');
 api.state.data.skills=SKILLS.map(s=>s.id);api.generateWorld();let red=0;for(let i=0;i<3;i++){api.begin('beam',api.state.enemies[2]);if(api.state.p.action.super)red++;for(let j=0;j<250;j++)api.update(1/60);}assert.equal(red,1,'meltdown fires every third cast');let boosted=new Economy({version:3,skills:['harvest','momentum','overdrive'],lastSeen:Date.now()-60000});assert.equal(boosted.offline(Date.now()).efficiency,.9);console.log('PASS final skill effects: third-cast red beam and 90% offline efficiency');
+/* 突发新闻的编排闸门（2026-09-17 反馈：频率太高、释放技能时不该出现、
+ * 一分钟左右一条差不多）。这里真跑行为，不看源码文字。
+ *
+ * 判据是"字幕条那条分支到底跑没跑"，用一个哨兵值读 #lowerThird.hidden：
+ * 本沙箱把 setTimeout 换成了同步执行（见上面的 sandbox），所以只要那条
+ * 分支跑了，hidden 一定会被写成 false 再被写成 true，哨兵必被冲掉；
+ * 被闸门压下来的那条压根不碰它，哨兵原样留着。
+ *
+ * 先清空世界、关掉托管、把怪兽位置每轮钉回起点：既没有击杀、也没有区域
+ * 突破，就不会有别的突发新闻插进来重新计时（同下面"帧时序"那段的做法）。
+ * 位置必须钉住 —— p.x 越过 LENGTH-260 就是"突破城区"，那本身就是一条
+ * 突发新闻，会把闸门重新拉满。这也是"闸门会衰减、隔满一分钟重新打开"
+ * 能被确定地量出来的前提。 */
+let keepAuto = api.state.data.auto, lt = node('lowerThird');
+api.state.data.auto = false;
+const drainBreak = () => { for (let i = 0; i < 61; i++) { api.state.p.x = 100; api.state.buildings.length = 0; api.state.enemies.length = 0; api.update(1, 1); } };
+drainBreak();
+assert.equal(api.breakCd, 0, '闸门必须随游戏时间衰减到 0，否则第一条突发新闻之后再也不会拉横幅，实测 ' + api.breakCd.toFixed(3));
+
+lt.hidden = 'SENTINEL';
+api.broadcast('甲','详情甲',true);
+assert.equal(lt.hidden, true, '闸门开着时，突发新闻必须真的拉起字幕条');
+assert.equal(api.breakCd, 60, '拉起字幕条之后闸门必须重置为 60 秒');
+
+lt.hidden = 'SENTINEL';
+api.broadcast('乙','详情乙',true);
+assert.equal(lt.hidden, 'SENTINEL', '间隔内的第二条突发新闻被放行了：字幕条一直挂着就不叫"突发"了');
+assert.equal(api.breakCd, 60, '被压下来的那条不许重置闸门');
+assert(api.state.news.some(n=>n.title==='乙'), '被压下来的那条仍然要进现场档案，消息不能丢');
+
+drainBreak();
+lt.hidden = 'SENTINEL';
+api.broadcast('丙','详情丙',true);
+assert.equal(lt.hidden, true, '隔满一分钟之后的下一条突发新闻必须能重新拉起字幕条');
+api.state.data.auto = keepAuto;
+
+/* 技能释放：不拉突发条，但仍然进现场档案与滚动新闻条（消息不丢，只是不抢画面）。
+ *
+ * 测之前必须再把闸门放开 —— 闸门闭着的时候它本来就会把技能那条压住，
+ * 于是"技能自己有没有申请 priority"根本测不出来。第一版就是这么写的，
+ * 变异测试把 begin 那处的 true 改回去时它没变红，才发现判据被闸门挡住了。 */
+drainBreak();
+assert.equal(api.breakCd, 0, '技能断言之前闸门必须先归零，否则测不出技能自己申请没申请突发条');
+lt.hidden = 'SENTINEL';
+api.begin('beam', { x: api.state.p.x + 400 });
+assert.equal(lt.hidden, 'SENTINEL', '释放原子吐息不该拉起突发新闻条');
+/* 现场档案封顶 20 条，所以判据是"最新那条是不是这次吐息"，
+ * 不能比长度（长度早就顶到上限了，涨不上去）。 */
+assert(/(高能反应|红莲临界)/.test(api.state.news[0].title), '技能播报仍要进现场档案（它只是不抢画面），实际是「' + api.state.news[0].title + '」');
+console.log('PASS breaking news: skill casts never raise the banner, other events are gated to one per minute');
+

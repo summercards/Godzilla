@@ -1,14 +1,18 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GNN · 巨兽都市 / PIXEL LIVE</title><link rel="stylesheet" href="style.css"></head><body>
 <!-- 复古老式电视柜：外壳可拖（见 tv-config TV_DRAG_CSS），画面与侧栏可点 -->
-<div class="shell tv-cabinet"><header class="tv-brand"><div class="brand-mark"><b>GNN</b><span>24</span></div><div class="brand-name">巨兽都市 · 像素直播</div><span class="external-status">自动破坏 · 持续进化</span></header>
+<div class="shell tv-cabinet"><header class="tv-brand"><div class="brand-mark"><b>GNN</b><span>24</span></div></header>
 <div class="tv-body">
 <!-- 电视左侧：大颗粒像素实体按钮（功能菜单 + 转台） -->
 <nav class="tv-sidebar" aria-label="电视控制面板">
   <div class="side-group"><span class="side-title">巨兽</span>
-    <div class="tv-menu" role="group" aria-label="成长功能">
-      <button id="open-assign" class="pixel-button chunky" aria-label="加点"><span class="pb-ico">＋</span><span class="pb-tx">加点</span><i id="assignHudBadge" class="hud-badge" hidden>0</i></button>
-      <button id="open-talent" class="pixel-button chunky" aria-label="天赋"><span class="pb-ico">✦</span><span class="pb-tx">天赋</span></button>
-      <button id="open-evo" class="pixel-button chunky" aria-label="变异"><span class="pb-ico">✺</span><span class="pb-tx">变异</span></button>
+    <!-- 侧栏入口只剩这一个。原来并排着「加点 / 天赋 / 变异」三个按钮，
+         2026-09-17 按反馈去掉后两个 —— 它们打开的是同一个观测面板里
+         已经存在的两个页签，一个面板给三条路是重复导航。
+         面板里的天赋 / 变异页签本身保留，进面板后照旧可切。
+         id 仍是 open-assign：入口打开的就是面板的「加点」那一页，
+         改的是显示名，接线不动。 -->
+    <div class="tv-menu" role="group" aria-label="观测面板">
+      <button id="open-assign" class="pixel-button chunky" aria-label="遥控器"><span class="pb-ico">▤</span><span class="pb-tx">遥控器</span><i id="assignHudBadge" class="hud-badge" hidden>0</i></button>
     </div>
   </div>
   <div class="side-group"><span class="side-title">转台</span>
@@ -21,14 +25,9 @@
 <canvas id="game" width="1280" height="720" aria-label="哥斯拉自动前进、破坏和释放技能，无需操控"></canvas>
 <canvas id="channel" width="1280" height="720" aria-label="电视频道画面" hidden></canvas>
 <div class="scanlines"></div>
-<!-- 常驻 HUD：突出经验条 / 核能 / 天赋 / 随机变异 -->
-<div class="hud" id="hud" aria-label="常驻状态">
-  <div class="hud-cell hud-energy"><span class="hud-k">核能</span><b id="hudEnergy">180</b><small id="hudProd">+0 / 秒</small></div>
-  <div class="hud-cell hud-lv"><span class="hud-k">等级</span><b id="hudLevel">01</b></div>
-  <div class="hud-cell hud-xp"><span class="hud-k">经验</span><div class="hud-xp-bar"><i id="hudXpFill"></i></div><small id="hudXpText">0 / 260</small></div>
-  <div class="hud-cell hud-talent"><span class="hud-k">天赋点</span><b id="hudTalent">0</b></div>
-  <div class="hud-cell hud-mut" id="hudMutation"><span class="hud-k">随机变异</span><b id="hudMutName">—</b></div>
-</div>
+<!-- 这里原来有一排常驻 HUD（核能 / 等级 / 经验 / 天赋点 / 随机变异），
+     2026-09-17 按反馈移除：那是数值面板的活，摆在直播画面上既挡画面
+     又是重复信息。数字本身仍在遥控器的观测面板里，与以前完全一致。 -->
 <div class="camera-top"><span><b>LIVE</b><span id="location">东京 · 新宿</span><small id="sector">SECTOR 001</small></span><span class="camera-id">AIR CAM 07 <i>●</i> <span id="clock">23:47:00</span></span></div>
 <div class="inset"><div><i></i>地面机位 <span>CAM 02</span></div><canvas id="monitor" width="240" height="130" aria-label="地面机位同步近景"></canvas></div>
 <div class="action-caption"><span id="actionLabel">持续跟踪</span><small id="actionSub">目标正在向城市深处移动</small></div><div class="event-banner" id="eventBanner" hidden></div>
@@ -44,6 +43,10 @@
 <div id="settingsPanel" role="tabpanel" aria-labelledby="settingsTab" class="settings-panel" hidden><article><h3>现场与画面</h3><button id="sound" class="pixel-button">开启现场声音</button><p>16:9 原始画幅 · 像素渲染</p></article><article><h3>存档与离线</h3><p>每 5 秒保存成长与城区进度。离线最多累计 8 小时核能，回来后自动入账。</p><p>原子吐息基础冷却 28 秒；近战技能优先释放。</p></article><article><h3>直播说明</h3><p>坦克、飞机与更强封锁单位会拖慢前进。强化力量、原子能与动能，逐步突破新区域。</p><p>按 Esc 返回直播。管理界面打开时，战斗继续运行。</p></article></div></div></section>
 <div id="offline" class="offline" hidden><div><b>离线观测已完成</b><p id="offlineText"></p></div><button id="dismissOffline" aria-label="关闭离线收益通知">×</button></div><div id="notice" class="notice" role="status"></div>
 </section></main></div>
-<footer><span>■ 自动运行中 · 近战优先</span><span>16:9 / PIXEL BROADCAST</span></footer></div>
+<!-- 页脚留空是**故意的**：原来左边是「自动运行中 · 近战优先」、右边是
+     「16:9 / PIXEL BROADCAST」，2026-09-17 按反馈去掉。
+     元素本身不能删 —— 这 38px + 8px 外边距是版面公式的一部分，
+     见 tv/style.css 里 footer 规则上面的说明。 -->
+<footer></footer></div>
 <!-- 资产层加载顺序：索引（路径）→ 骨骼数据（结构）→ 形态（样式/颜色/大小）→ 装配 → 渲染 -->
 <script src="progression.js"></script><script src="assets/asset-index.js"></script><script src="assets/monsters/godzilla/rig.data.js"></script><script src="appearance.js"></script><script src="rig.js"></script><script src="game.js"></script></body></html>
