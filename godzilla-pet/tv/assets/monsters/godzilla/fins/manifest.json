@@ -1,0 +1,772 @@
+{
+  "algorithm": {
+    "band_frac": 0.1,
+    "blue_grow": 15,
+    "border_mx": 72,
+    "border_rings": 7,
+    "clean": {
+      "back_clamp_dn": 6,
+      "back_clamp_up": 10,
+      "back_win": 55,
+      "blob_rings": 14,
+      "blue_min": 25,
+      "dark_max": 76,
+      "edge_darken": true,
+      "island_margin": 24,
+      "island_min": 600
+    },
+    "lum_grow": 105,
+    "min_crystal": 800,
+    "roi_margin": 32,
+    "seed_delta": 30
+  },
+  "default_sha256": {
+    "far_shin": "e75874f3421f1d5cc7612ff79b3305fe7a188203c909e3a0fc8442871e348d2f",
+    "far_thigh": "7f4dd96c617ff3fb624aacaef7bf9f1283d8bfe698216715bf88063da04ca859",
+    "forearm": "841a4e4ea92e9a744366469adbd7bae20e77b3455f5e3e6c3b1d2a592ece3799",
+    "head": "fe44445cc155c13d453832c6dfbc6bb5a7bbedad382251604225a12562555ca3",
+    "jaw": "d8f3101066ae2e281d25d75643258608fa307a093dac0339aaa4bcd72a8612b2",
+    "shin": "4348eb9c494606f68f5b35df31f5dbabe4850a42f8036f8877bd84cfd67a80a7",
+    "tail_base": "389b8aa9deb02b4a2e377947ca9b8d10ac4ad250ccbc23837439dcf54601e01b",
+    "tail_mid": "a5da905ac848273b57e6a91ec70743ad74cdbb168bc96a50e10653aa89792582",
+    "tail_tip": "a329f04a29c45c4da0714dd0ed7b2c58c947b0f16b08bd692f1cd5884940a02b",
+    "thigh": "c2d22dd8bb1c382664c87f677ac76864b98250b774552ab56b53d5485ff8e2e9",
+    "torso": "629ff41de74b809794e057dba422d5ea10a3488f7655a51b2d2f398c22aa1026",
+    "upper_arm": "aedfe9a9dc7a05ec4af6b54d5895c70437d7119afdfeb936ba6dcb981ed2897e"
+  },
+  "fins": {
+    "blade": {
+      "anchor": [
+        0.777,
+        1.0
+      ],
+      "aspect": 2.0256,
+      "dims": [
+        39,
+        79
+      ],
+      "path": "fins/blade.png",
+      "pixels": 1779,
+      "sha256": "eeaff2b00151adcd2d3d0d03a66c5306e5a51f17911a6d3658b253344552b87b",
+      "src": "torso",
+      "src_bbox": [
+        979,
+        88,
+        1017,
+        166
+      ]
+    },
+    "crown": {
+      "anchor": [
+        0.5654,
+        1.0
+      ],
+      "aspect": 1.0459,
+      "dims": [
+        218,
+        228
+      ],
+      "path": "fins/crown.png",
+      "pixels": 23804,
+      "sha256": "879755b7b340ae0b5200fb77dfd73a402991641a881974797805a6360e9f86c4",
+      "src": "torso",
+      "src_bbox": [
+        633,
+        258,
+        850,
+        485
+      ]
+    }
+  },
+  "generator": "godzilla-pet/build/growth-assets.py",
+  "palette_sha256": "4a14b42ddf07a0d36b48cfedaed5b4b0d6742a482af37009e185d2873b49aaac",
+  "parts": {
+    "far_shin": {
+      "clean_sha256": "dbf1f1485e4cb772ece39375ad2f14c316853cf436ddcc326a8202544b023ca8",
+      "clean_stats": {
+        "blob_extra": 0,
+        "blob_pixels": 0,
+        "blue_healed": 0,
+        "cut_pixels": 0,
+        "dropped_islands": 0,
+        "edge_pixels": 0
+      },
+      "dims": [
+        261,
+        217
+      ],
+      "fin_bbox": null,
+      "fin_pixels": 0,
+      "fin_sha256": "6f2fc1380690fa0906325566392d991859a754a1827f7ba49974a67f7c37c9c7",
+      "nofin_sha256": "dbf1f1485e4cb772ece39375ad2f14c316853cf436ddcc326a8202544b023ca8",
+      "residual_border_px": 0,
+      "roi": null,
+      "skins": {
+        "ember": {
+          "dims": [
+            261,
+            217
+          ],
+          "sha256": "c3a1e3277edd470351ba8a5bc17253edb2e486ddbce5190108e9cad478572e69"
+        },
+        "frost": {
+          "dims": [
+            261,
+            217
+          ],
+          "sha256": "9a2244d75d7f1e4dd1915ff94387c80e37fcaf0e3a09f7e0e05743cff2989034"
+        },
+        "jade": {
+          "dims": [
+            261,
+            217
+          ],
+          "sha256": "d580f3af193bcaf715a1da72ab083fb3f1cd3f33ffe08da0b80aa938dcb03fcc"
+        },
+        "void": {
+          "dims": [
+            261,
+            217
+          ],
+          "sha256": "ba5c18f3db11c675f60733ff8a3d4930b08f0331b103c2ac6e90ba41dc77489b"
+        }
+      },
+      "src": "parts/far_shin/default.png",
+      "src_sha256": "e75874f3421f1d5cc7612ff79b3305fe7a188203c909e3a0fc8442871e348d2f"
+    },
+    "far_thigh": {
+      "clean_sha256": "bd5efc269c0b35361661f9ed3b9786368c1019a7a5b0319db5e9cc1bf9c4f1a8",
+      "clean_stats": {
+        "blob_extra": 0,
+        "blob_pixels": 0,
+        "blue_healed": 0,
+        "cut_pixels": 0,
+        "dropped_islands": 0,
+        "edge_pixels": 0
+      },
+      "dims": [
+        298,
+        285
+      ],
+      "fin_bbox": null,
+      "fin_pixels": 0,
+      "fin_sha256": "7c28c283616873e501001a972baf7ffe3c58166dfd787b64fe50d5e671a0a6b4",
+      "nofin_sha256": "bd5efc269c0b35361661f9ed3b9786368c1019a7a5b0319db5e9cc1bf9c4f1a8",
+      "residual_border_px": 0,
+      "roi": null,
+      "skins": {
+        "ember": {
+          "dims": [
+            298,
+            285
+          ],
+          "sha256": "2754cfab1dd43f959e9c741daee98e8aaf7689d3e6b6676b31b42c41bd6bd4c0"
+        },
+        "frost": {
+          "dims": [
+            298,
+            285
+          ],
+          "sha256": "2f50b6c026a80b31be282279bd175facd85337955b7cc4e3fb3a7fb713df9d1f"
+        },
+        "jade": {
+          "dims": [
+            298,
+            285
+          ],
+          "sha256": "5185dbe6c11d352cd74423edffcdb84d7155fbe5dc3b6a4576324a4aa8e036d4"
+        },
+        "void": {
+          "dims": [
+            298,
+            285
+          ],
+          "sha256": "e95a0111dce2e8256e18f0f0120d3a9dbf48fec671cb60cdef2e52a91ce86066"
+        }
+      },
+      "src": "parts/far_thigh/default.png",
+      "src_sha256": "7f4dd96c617ff3fb624aacaef7bf9f1283d8bfe698216715bf88063da04ca859"
+    },
+    "forearm": {
+      "clean_sha256": "f6476367ef107fcfd201d870c75120337fa2da7b674169bffa26942febdb6488",
+      "clean_stats": {
+        "blob_extra": 0,
+        "blob_pixels": 0,
+        "blue_healed": 0,
+        "cut_pixels": 0,
+        "dropped_islands": 0,
+        "edge_pixels": 0
+      },
+      "dims": [
+        312,
+        182
+      ],
+      "fin_bbox": null,
+      "fin_pixels": 0,
+      "fin_sha256": "cf6acf927d76c928037e159d32eb547565a954d7b847ae9cb4cff8ed4f877969",
+      "nofin_sha256": "f6476367ef107fcfd201d870c75120337fa2da7b674169bffa26942febdb6488",
+      "residual_border_px": 0,
+      "roi": null,
+      "skins": {
+        "ember": {
+          "dims": [
+            312,
+            182
+          ],
+          "sha256": "1db1ff01f0ffff8e7fa51925991ab451c46e39e67ed0a0142ad1907af5b96cbb"
+        },
+        "frost": {
+          "dims": [
+            312,
+            182
+          ],
+          "sha256": "e2cee5e33fee7089bc30246d487d9c8bf3b32bf8780ff26e577180e0c291c5ae"
+        },
+        "jade": {
+          "dims": [
+            312,
+            182
+          ],
+          "sha256": "d0a6a829822079d3a56dcffff3b99187e014d1e7f06bf4f3c785f9f0c00e3834"
+        },
+        "void": {
+          "dims": [
+            312,
+            182
+          ],
+          "sha256": "db93053338184055ccdeee03b79f5240ba2d81a7e1f5b7edb73440a13551c39b"
+        }
+      },
+      "src": "parts/forearm/default.png",
+      "src_sha256": "841a4e4ea92e9a744366469adbd7bae20e77b3455f5e3e6c3b1d2a592ece3799"
+    },
+    "head": {
+      "clean_sha256": "aeab1a613b62246d671606f8af9cf0cc3434d0bc3ea4433c620691f60d873365",
+      "clean_stats": {
+        "blob_extra": 6981,
+        "blob_pixels": 12198,
+        "blue_healed": 0,
+        "cut_pixels": 7162,
+        "dropped_islands": 0,
+        "edge_pixels": 418
+      },
+      "dims": [
+        391,
+        289
+      ],
+      "fin_bbox": [
+        1,
+        31,
+        211,
+        161
+      ],
+      "fin_pixels": 5217,
+      "fin_sha256": "ab2d8ef4026638032e98cb690e9fa2da307010d9414d1f848eccd7bc28f1f90f",
+      "nofin_sha256": "fd2eecf58e9f755fbc98d26d1b1e2b5de79c00e8c4de4c675f7831c1b5588e8f",
+      "residual_border_px": 23,
+      "roi": [
+        0,
+        1,
+        211,
+        190
+      ],
+      "skins": {
+        "ember": {
+          "dims": [
+            391,
+            289
+          ],
+          "sha256": "aaf3b1bc53f4ab24dddb628caba1afb5134941972b716cb180d6fd02ef60f107"
+        },
+        "frost": {
+          "dims": [
+            391,
+            289
+          ],
+          "sha256": "be0fa35d8aec2d7cb8829e5b688b053f98f023fca6b76338f2de5961bf367440"
+        },
+        "jade": {
+          "dims": [
+            391,
+            289
+          ],
+          "sha256": "f3c79edc748af1028dcaee56ec1f6802c6eb78c615327010af41cdd311c6530c"
+        },
+        "void": {
+          "dims": [
+            391,
+            289
+          ],
+          "sha256": "3979fd0cd27cc1b9b071c3351c2e8a25c160351281f6548d08ae99cd92275a23"
+        }
+      },
+      "src": "parts/head/default.png",
+      "src_sha256": "fe44445cc155c13d453832c6dfbc6bb5a7bbedad382251604225a12562555ca3"
+    },
+    "jaw": {
+      "clean_sha256": "188471b7e1dc3f28ab617512032ec1addc3000e97796906ce673deae6371ddb4",
+      "clean_stats": {
+        "blob_extra": 0,
+        "blob_pixels": 0,
+        "blue_healed": 0,
+        "cut_pixels": 0,
+        "dropped_islands": 0,
+        "edge_pixels": 0
+      },
+      "dims": [
+        134,
+        114
+      ],
+      "fin_bbox": null,
+      "fin_pixels": 0,
+      "fin_sha256": "00652b94f8f038f4dab0485f69c2bdfc6c010df9c33d2416a87bd1784b463da4",
+      "nofin_sha256": "188471b7e1dc3f28ab617512032ec1addc3000e97796906ce673deae6371ddb4",
+      "residual_border_px": 0,
+      "roi": null,
+      "skins": {
+        "ember": {
+          "dims": [
+            134,
+            114
+          ],
+          "sha256": "bcc4253b9ceef3b5fbc9ad17d340c30141d0620dad21ce2ad88cb9b67d284910"
+        },
+        "frost": {
+          "dims": [
+            134,
+            114
+          ],
+          "sha256": "ed80614c7fde6e57a0d8ec866808ecc8bf4da6cd3cf70dc92f9dfc446a7ffe55"
+        },
+        "jade": {
+          "dims": [
+            134,
+            114
+          ],
+          "sha256": "5514c0c2eb095431b6ee36f3324808d1a0517036e7e5a8dd5bee84b77eb48c8a"
+        },
+        "void": {
+          "dims": [
+            134,
+            114
+          ],
+          "sha256": "304845eeff512e6438917f21f2d768fe690e25ca995c8c3d905e712cc7bfcab1"
+        }
+      },
+      "src": "parts/jaw/default.png",
+      "src_sha256": "d8f3101066ae2e281d25d75643258608fa307a093dac0339aaa4bcd72a8612b2"
+    },
+    "shin": {
+      "clean_sha256": "ffa0f56827881ebd3b9f784fe1a9cf27281b84e71e42cec5f65448e7381636e5",
+      "clean_stats": {
+        "blob_extra": 0,
+        "blob_pixels": 0,
+        "blue_healed": 0,
+        "cut_pixels": 0,
+        "dropped_islands": 0,
+        "edge_pixels": 0
+      },
+      "dims": [
+        392,
+        188
+      ],
+      "fin_bbox": null,
+      "fin_pixels": 0,
+      "fin_sha256": "a3e3632cf01e207309c2ecd1296ba7a69723fd87a7e0e5375f589d56e141e281",
+      "nofin_sha256": "ffa0f56827881ebd3b9f784fe1a9cf27281b84e71e42cec5f65448e7381636e5",
+      "residual_border_px": 0,
+      "roi": null,
+      "skins": {
+        "ember": {
+          "dims": [
+            392,
+            188
+          ],
+          "sha256": "cc2d8d488b29283bde10a0e3d3b9085c37a34a0fca01c7c70ff402836c1865bd"
+        },
+        "frost": {
+          "dims": [
+            392,
+            188
+          ],
+          "sha256": "f5b0b20bd56191ccaf2afe367cb5e7e75e26a4a3b5457fad5f3dfeb030d4aff7"
+        },
+        "jade": {
+          "dims": [
+            392,
+            188
+          ],
+          "sha256": "9b4c01b9bb5b38edbb8ff56f41f8cc3de0e940ea18d363771f3a39de1d1c1b6e"
+        },
+        "void": {
+          "dims": [
+            392,
+            188
+          ],
+          "sha256": "533a38939c15b2ee736473947de07de6861214856fced0d8944fd79bacc137b0"
+        }
+      },
+      "src": "parts/shin/default.png",
+      "src_sha256": "4348eb9c494606f68f5b35df31f5dbabe4850a42f8036f8877bd84cfd67a80a7"
+    },
+    "tail_base": {
+      "clean_sha256": "471ed2d91a6e350996761d3c04d20ab2de0908dd1319bf92e8e2c41bcf0aa5d2",
+      "clean_stats": {
+        "blob_extra": 6202,
+        "blob_pixels": 17060,
+        "blue_healed": 0,
+        "cut_pixels": 12936,
+        "dropped_islands": 0,
+        "edge_pixels": 300
+      },
+      "dims": [
+        409,
+        385
+      ],
+      "fin_bbox": [
+        136,
+        8,
+        292,
+        167
+      ],
+      "fin_pixels": 10858,
+      "fin_sha256": "2084082b6683428ddfe8a11dccdd0410c9c1db02d6c3d078a396ed40eb607330",
+      "nofin_sha256": "dd98d1c892049c5f0c69990921cd01ee16e04dbb050128c650960366333c2486",
+      "residual_border_px": 27,
+      "roi": [
+        104,
+        0,
+        322,
+        197
+      ],
+      "skins": {
+        "ember": {
+          "dims": [
+            409,
+            385
+          ],
+          "sha256": "137a7de89888c7cf268f47fa3ca9fd175dcd7136c28ddd2eb3a42010dcd8e72f"
+        },
+        "frost": {
+          "dims": [
+            409,
+            385
+          ],
+          "sha256": "2d6e474c675f3cf0dcf998f75f36e022810214877ad7510492172d9cf45acf35"
+        },
+        "jade": {
+          "dims": [
+            409,
+            385
+          ],
+          "sha256": "af4a7e7e53024ba4ca268281be22e71fb2d3641b9f457274704de6111cb41d8a"
+        },
+        "void": {
+          "dims": [
+            409,
+            385
+          ],
+          "sha256": "dd92c72885c9615660e0e9629f70dfb79bf87f5dad77c40cee7b062480e899a1"
+        }
+      },
+      "src": "parts/tail_base/default.png",
+      "src_sha256": "389b8aa9deb02b4a2e377947ca9b8d10ac4ad250ccbc23837439dcf54601e01b"
+    },
+    "tail_mid": {
+      "clean_sha256": "d5d8b6edfd900fcadac90c09498f62baf7b8ad7309c8de191b62bbcd8fa53f41",
+      "clean_stats": {
+        "blob_extra": 8302,
+        "blob_pixels": 16561,
+        "blue_healed": 0,
+        "cut_pixels": 9625,
+        "dropped_islands": 0,
+        "edge_pixels": 590
+      },
+      "dims": [
+        307,
+        337
+      ],
+      "fin_bbox": [
+        1,
+        69,
+        296,
+        214
+      ],
+      "fin_pixels": 8259,
+      "fin_sha256": "bdef8d540b3acf788651d34bf310a4b277d00ec2d381fbeb3d9da70bbca02dc6",
+      "nofin_sha256": "6b2487fa3a8eb1dbf139115e1ac7fe2c8290b012ca856562ce10e89ac90d3549",
+      "residual_border_px": 82,
+      "roi": [
+        0,
+        42,
+        306,
+        241
+      ],
+      "skins": {
+        "ember": {
+          "dims": [
+            307,
+            337
+          ],
+          "sha256": "1f6b2bed3e13ad1cac18eb1f9ebd768509fd9d4e4a30ae59a8b92b6e5f1f3c42"
+        },
+        "frost": {
+          "dims": [
+            307,
+            337
+          ],
+          "sha256": "3c48dc783c571a1f83152e7ac81fecf2b86108f2e3059e9cf97ff51fe308ab8c"
+        },
+        "jade": {
+          "dims": [
+            307,
+            337
+          ],
+          "sha256": "14b4ea61eb700e2c961053b22bdddc8f946905570e380f439e11b4313f1170ba"
+        },
+        "void": {
+          "dims": [
+            307,
+            337
+          ],
+          "sha256": "a301518a141dbf08863282ed6666939c2197368d342bf77f6c0af2141d2a3a4c"
+        }
+      },
+      "src": "parts/tail_mid/default.png",
+      "src_sha256": "a5da905ac848273b57e6a91ec70743ad74cdbb168bc96a50e10653aa89792582"
+    },
+    "tail_tip": {
+      "clean_sha256": "176150ffd05c652d4f9953defa4f1dbb85b081edbac039f1232d7323b53182b2",
+      "clean_stats": {
+        "blob_extra": 7097,
+        "blob_pixels": 10333,
+        "blue_healed": 0,
+        "cut_pixels": 3602,
+        "dropped_islands": 0,
+        "edge_pixels": 438
+      },
+      "dims": [
+        346,
+        350
+      ],
+      "fin_bbox": [
+        76,
+        71,
+        345,
+        163
+      ],
+      "fin_pixels": 3236,
+      "fin_sha256": "ee197a6c1485a2bbad92f56a621f500b49a76d5bef59a93e6bc5897673cfc376",
+      "nofin_sha256": "d5d17037a487929527b9dd61c8ce98b0d5ea1a78d9213c2c8808417168c2b39a",
+      "residual_border_px": 47,
+      "roi": [
+        46,
+        46,
+        345,
+        190
+      ],
+      "skins": {
+        "ember": {
+          "dims": [
+            346,
+            350
+          ],
+          "sha256": "112f54e727fe2de7b1c8143a208ca0741cea4995adbc21edf66bd451328d22c0"
+        },
+        "frost": {
+          "dims": [
+            346,
+            350
+          ],
+          "sha256": "a2167c5ecd813939c024db5025f1093f150976ceaf70a44e6ec321ea2a68241a"
+        },
+        "jade": {
+          "dims": [
+            346,
+            350
+          ],
+          "sha256": "a767fa38360a94903ea3e106f94e9a26d516bfd761437d6d446c229acb32f792"
+        },
+        "void": {
+          "dims": [
+            346,
+            350
+          ],
+          "sha256": "73ae4c18bccc7f02fa4f295212f0d869c5bd8050a6ac6628973efea61f5ef04b"
+        }
+      },
+      "src": "parts/tail_tip/default.png",
+      "src_sha256": "a329f04a29c45c4da0714dd0ed7b2c58c947b0f16b08bd692f1cd5884940a02b"
+    },
+    "thigh": {
+      "clean_sha256": "0833410b06b66bfbc3fb2d653be8545fd353f5c41c5903789b8e30c5c50f846b",
+      "clean_stats": {
+        "blob_extra": 0,
+        "blob_pixels": 0,
+        "blue_healed": 0,
+        "cut_pixels": 0,
+        "dropped_islands": 0,
+        "edge_pixels": 0
+      },
+      "dims": [
+        389,
+        364
+      ],
+      "fin_bbox": null,
+      "fin_pixels": 0,
+      "fin_sha256": "734a8f916f1cc94be928c364711417341c39507d36d90cd59a2cbe3b681eb5cf",
+      "nofin_sha256": "0833410b06b66bfbc3fb2d653be8545fd353f5c41c5903789b8e30c5c50f846b",
+      "residual_border_px": 0,
+      "roi": null,
+      "skins": {
+        "ember": {
+          "dims": [
+            389,
+            364
+          ],
+          "sha256": "db4f985ac7d155a48a3c367fecbc52355fd1964006ca179d5322c4ea002b4344"
+        },
+        "frost": {
+          "dims": [
+            389,
+            364
+          ],
+          "sha256": "b4bb6bcc403a26cdce65caf4f7dcf5f845c071c7a0ef7f647f67fc2b248da649"
+        },
+        "jade": {
+          "dims": [
+            389,
+            364
+          ],
+          "sha256": "8ca282cf1aeb05c28a8b2852faa1ea57c6a8798a8b7cf325279280633dce96af"
+        },
+        "void": {
+          "dims": [
+            389,
+            364
+          ],
+          "sha256": "68bad324b9627fca4c132f1a450abe823435614cded4095fe8ce11263ee4a136"
+        }
+      },
+      "src": "parts/thigh/default.png",
+      "src_sha256": "c2d22dd8bb1c382664c87f677ac76864b98250b774552ab56b53d5485ff8e2e9"
+    },
+    "torso": {
+      "clean_sha256": "760fa2cf48ef245a0e0ac0bf00d5cfd6966857547e8b0cb13d1ca6ee1425681c",
+      "clean_stats": {
+        "blob_extra": 21487,
+        "blob_pixels": 87839,
+        "blue_healed": 0,
+        "cut_pixels": 76958,
+        "dropped_islands": 5,
+        "edge_pixels": 716
+      },
+      "dims": [
+        1445,
+        979
+      ],
+      "fin_bbox": [
+        602,
+        84,
+        1017,
+        591
+      ],
+      "fin_pixels": 66352,
+      "fin_sha256": "5cd516109c677a0b6a0ab3227601eedc513aa0302b025563b89eef57f9856eca",
+      "nofin_sha256": "60121fc50ce0a52522ba768302862734d4d96b55b3d24d4af82651ab8493d569",
+      "residual_border_px": 120,
+      "roi": [
+        577,
+        56,
+        1049,
+        622
+      ],
+      "skins": {
+        "ember": {
+          "dims": [
+            1445,
+            979
+          ],
+          "sha256": "a0a1901ce0f7f2fd6307230981be2614405c5a27743595b07eca6193206e713e"
+        },
+        "frost": {
+          "dims": [
+            1445,
+            979
+          ],
+          "sha256": "eccc0629e02119590d87b876f6edb395898dc500d6c1c8da4c3e4cb05e9f9aa6"
+        },
+        "jade": {
+          "dims": [
+            1445,
+            979
+          ],
+          "sha256": "14738a552d08ac11f681f263c9b9964ce53acf8b16f9922d01fff7642d799bd2"
+        },
+        "void": {
+          "dims": [
+            1445,
+            979
+          ],
+          "sha256": "358269b9f7088f3a3c27ac45499b145876cd934ca468e53f4a4d86d342f3ba27"
+        }
+      },
+      "src": "parts/torso/default.png",
+      "src_sha256": "629ff41de74b809794e057dba422d5ea10a3488f7655a51b2d2f398c22aa1026"
+    },
+    "upper_arm": {
+      "clean_sha256": "8361d91f4a1ee47c8a0eb8a521b7144876e19ca1b3ad7e2093bd822d5b8bcdc6",
+      "clean_stats": {
+        "blob_extra": 0,
+        "blob_pixels": 0,
+        "blue_healed": 0,
+        "cut_pixels": 0,
+        "dropped_islands": 0,
+        "edge_pixels": 0
+      },
+      "dims": [
+        213,
+        210
+      ],
+      "fin_bbox": null,
+      "fin_pixels": 0,
+      "fin_sha256": "916e68b6fd900319f965594e76125ab5ed75585b3887c8ef59052f8fe0d78b9b",
+      "nofin_sha256": "8361d91f4a1ee47c8a0eb8a521b7144876e19ca1b3ad7e2093bd822d5b8bcdc6",
+      "residual_border_px": 0,
+      "roi": null,
+      "skins": {
+        "ember": {
+          "dims": [
+            213,
+            210
+          ],
+          "sha256": "5784b63a0fe23c00b1fd97acf9d7265bf8a0ad5f1af1047a376cdbbb42fab855"
+        },
+        "frost": {
+          "dims": [
+            213,
+            210
+          ],
+          "sha256": "3bffd2ff06300746fc4dbb39d8190f666c087ca0a7348dc1f51e339e641ec157"
+        },
+        "jade": {
+          "dims": [
+            213,
+            210
+          ],
+          "sha256": "fa17ca545ef0e7cb89b5695fda3deb073c23390a952f76c7987285f236109e54"
+        },
+        "void": {
+          "dims": [
+            213,
+            210
+          ],
+          "sha256": "21d5233e9fdd24c317a5395a76ff84aa2a671053cc7a344f449c7a7ec0dd6188"
+        }
+      },
+      "src": "parts/upper_arm/default.png",
+      "src_sha256": "aedfe9a9dc7a05ec4af6b54d5895c70437d7119afdfeb936ba6dcb981ed2897e"
+    }
+  },
+  "version": 2
+}

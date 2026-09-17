@@ -5,3 +5,8 @@ dist/*.app/
 
 # 智能体在工作目录里留下的笔记与临时文件，不属于产品的一部分
 .workbuddy/
+
+# Local verification captures, sandbox profiles and Python bytecode
+/outputs/
+__pycache__/
+*.py[cod]

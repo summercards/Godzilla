@@ -55,7 +55,16 @@
         rigRuntime: 'rig.data.js',                  // 同上，浏览器可直接加载的形态（生成）
       },
       /** 已存在的样式，用于校验：某个形态引用了不存在的样式必须在测试里报错。 */
-      styles: { default: { label: '原色' } },
+      styles: {
+        default: { label: '原图重组基准' }, nofin: { label: '互补拆层身体（仅校验）' },
+        fin: { label: '互补背鳍层（仅校验）' }, clean: { label: '玄岩幼兽' },
+        jade: { label: '翠岩' }, frost: { label: '霜蓝' },
+        ember: { label: '熔岩' }, void: { label: '紫晶' },
+      },
+      finSprites: {
+        crown: { path: 'fins/crown.png', anchor: [0.5654, 1] },
+        blade: { path: 'fins/blade.png', anchor: [0.777, 1] },
+      },
     },
   };
 

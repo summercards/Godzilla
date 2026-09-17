@@ -20,6 +20,13 @@
 (function (root) {
 'use strict';
 
+/* 成长的数值口径（体型曲线 / 体征解锁门槛 / 战斗数值的区域系数）全部来自
+ * growth.js —— 本文件不再自带第二套体型公式。见 growth.js 顶部的约定。 */
+const Growth = (typeof module !== 'undefined' && module.exports)
+  ? require('./growth.js')
+  : root.KaijuGrowth;
+if (!Growth) throw new Error('progression.js 需要先加载 growth.js');
+
 /* ------------------------------------------------------------------ *
  * 强化项与技能树（原有，不动）
  * ------------------------------------------------------------------ */
@@ -241,12 +248,25 @@ function pickCategory(rng, weather) {
  * 两步：先按稀有度权重定稀有度，再在该稀有度的全部突变里按类别权重抽一个。
  * 类别和稀有度不是独立的（比如常见稀有度只有属性类突变），
  * 所以必须先定稀有度、再在它内部按类别挑，否则会出现不存在的组合。 */
+/* 体征门槛：某个部位的突变，要等对应的体征解锁之后才可能被抽到。
+ * 背鳍类（part === 'spikes'）绑 growth 的 15 级门槛 —— 老版本没有这道闸，
+ * 低等级就能抽出"背刺 +3 根"，而那时按设计一根都不该有。
+ * 单条数据想自己定门槛就加 minLevel。 */
+function gateFor(m) {
+  if (Number(m.minLevel) > 0) return Number(m.minLevel);
+  return m.part === 'spikes' ? Growth.GATES.spines : 0;
+}
+
 function mutateFor(seed, level, weather, rarityOverride) {
   const rng = mulberry32(hashSeed(seed, level));
   const table = rarityOverride || rarityTableFor(weather);
   const rk = pickWeighted(rng, table, (row) => row.w).key;
 
-  const pool = MUTATIONS.filter((m) => m.rarity === rk);
+  const byRarity = MUTATIONS.filter((m) => m.rarity === rk);
+  /* 门槛过滤后若整个稀有度被清空（策划把门槛调太高时会这样），退回未过滤池，
+   * 保证任何等级都抽得出东西 —— 空池会让"每级抽一次"静默失效。 */
+  const gated = byRarity.filter((m) => level >= gateFor(m));
+  const pool = gated.length ? gated : byRarity;
   const cat = pickCategory(rng, weather);
   const inCat = pool.filter((m) => m.cat === cat);
   const chosen = (inCat.length ? inCat : pool);
@@ -263,7 +283,10 @@ function mutateFor(seed, level, weather, rarityOverride) {
  * 而"一章 5 关"的节拍要求大致每 3 个区域升一级。
  * ------------------------------------------------------------------ */
 const Ke = (d) => 1 + (d - 1) * 0.19;      // 敌人经验系数
-const Kb = (d) => 1 + (d - 1) * 0.22;      // 建筑经验系数
+/* 建筑耐久与建筑经验共用区域强度系数，系数本身住在 growth.js —— 那边是
+ * 攻防平衡的唯一真源（巨兽伤害乘同一个倍率）。这里**不再写第二份 0.22**：
+ * 两处各写一份的话，策划案调其中一个就会让"拆楼效率"悄悄漂移。 */
+const Kb = (d) => 1 + (d - 1) * Growth.DISTRICT.coef;   // 建筑耐久 / 经验系数
 const xpPerEnemy = (d) => Math.round(12 * Ke(d));
 const xpPerBuilding = (d, layer) => Math.round((layer === 1 ? 24 : 12) * Kb(d));
 const xpPerDistrict = (d) => Math.round(60 * Ke(d));
@@ -298,12 +321,22 @@ function stageIndexFor(data) {
   return i;
 }
 
+/* 形态阶梯。scale 是**本档的体型区间**，由 growth.baseScale() 在区间内按等级
+ * 线性插值 —— 这是体型的唯一出处，渲染层不再有第二套公式。
+ *   幼兽   1 → 25   0.34 → 0.58     1 级 = 0.34（初始体型）
+ *   亚成体 25 → 50   0.58 → 0.76
+ *   成体   50 → 75   0.76 → 0.90
+ *   完全体 75 → 100  0.90 → 1.00
+ *   灾厄体 100+      1.00（基础到此饱和，之后靠天赋/突变）
+ * 区间必须首尾相接（上一档 hi == 下一档 lo），否则跨档时体型会跳变。
+ * 背鳍根数**不在**这里 —— 它由 growth.spineCount() 按等级给，15 级才解锁；
+ * 老版本这个字段是 3/5/6/7/9，等于 1 级就长背鳍，已移除以免出现第二个真源。 */
 const EPOCHS = [
-  { name: '幼兽', min: 1, scale: [1.00, 1.15], color: '#2f4d3a', spikes: 3 },
-  { name: '亚成体', min: 25, scale: [1.16, 1.32], color: '#38573f', spikes: 5, fork: true },
-  { name: '成体', min: 50, scale: [1.33, 1.49], color: '#4a5a3c', spikes: 6, fork: true, elemental: true },
-  { name: '完全体', min: 75, scale: [1.50, 1.65], color: '#6b5436', spikes: 7, fork: true, elemental: true, texture: true },
-  { name: '灾厄体', min: 100, scale: [1.66, 1.80], color: '#7a4a2c', spikes: 9, fork: true, elemental: true, texture: true, aura: true },
+  { name: '幼兽', min: 1, scale: [0.34, 0.58], color: '#2f4d3a' },
+  { name: '亚成体', min: 25, scale: [0.58, 0.76], color: '#38573f', fork: true },
+  { name: '成体', min: 50, scale: [0.76, 0.90], color: '#4a5a3c', fork: true, elemental: true },
+  { name: '完全体', min: 75, scale: [0.90, 1.00], color: '#6b5436', fork: true, elemental: true, texture: true },
+  { name: '灾厄体', min: 100, scale: [1.00, 1.00], color: '#7a4a2c', fork: true, elemental: true, texture: true, aura: true },
 ];
 
 const epochIndexFor = (level) => {
@@ -312,19 +345,12 @@ const epochIndexFor = (level) => {
   return i;
 };
 
-/* 体型缩放。锚点是脚底（见 rig.js），上限 1.80 是硬约束：
- * 再大就会盖住页眉或底部新闻条。 */
+/* 体型缩放。锚点是脚底（见 rig.js 的 pose()/scaleRig()），总上限 1.12：
+ * 再大就会盖住页眉或底部新闻条。曲线、上限、天赋乘数全部在 growth.js，
+ * 本函数只是转发 —— 老实现自带的 1.80 上限与渲染层从来不调用它，是第二套
+ * 只好看不好用的公式，已删除。 */
 function globalScaleFor(level, talents, morph) {
-  const t = talents || {};
-  const m = morph || {};
-  const raw = 1
-    + 0.005 * (level - 1)
-    + 0.02 * (t.mass || 0)
-    + 0.03 * (t.magma || 0)
-    + 0.03 * epochIndexFor(level)
-    + 0.015 * (m.colossal || 0)
-    + (m.extraScale || 0);
-  return Math.min(1.80, Math.max(1.00, raw));
+  return Growth.bodyScale(level, talents, morph, EPOCHS);
 }
 
 /* ------------------------------------------------------------------ *
@@ -440,11 +466,17 @@ class Economy {
   }
 
   has(id) { return this.data.skills.includes(id); }
+  /* mult() 是**收益**的等级膨胀（挂机核能），与攻击力无关 —— 见下面两条。 */
   mult() { return 1 + (this.data.level - 1) * 0.07; }
   passive() { return (2.5 + this.data.levels.metabolism * 1.4) * this.mult() * (this.has('harvest') ? 1.25 : 1) * (1 + (this.data.morph.energyBoost || 0)); }
   rewardMult() { return (1 + (this.data.levels.metabolism - 1) * 0.12) * (this.has('harvest') ? 1.25 : 1); }
-  power() { return (54 + this.data.levels.power * 22) * this.mult() * (1 + (this.data.morph.dmgBoost || 0)); }
-  atomic() { return (85 + this.data.levels.atomic * 30) * this.mult() * (1 + (this.data.morph.beamBoost || 0)); }
+  /* 攻击力：不再随等级膨胀。老公式乘了 mult() = 1+(L-1)*0.07，50 级时是初始的
+   * 4.4 倍 —— "1 级就是初始攻击力"这句话在数值上根本不成立。
+   * 改由**区域推进**驱动，系数与建筑 HP 的 Kb 同源（见 growth.COMBAT），
+   * 推图时伤害跟着涨、后期不会打不动；等级则只负责体型。
+   * 想回退旧行为：把 growth.js 的 COMBAT.levelScaling 打开即可。 */
+  power() { return (54 + this.data.levels.power * 22) * Growth.levelMult(this.data.level) * Growth.districtScale(this.data.district) * (1 + (this.data.morph.dmgBoost || 0)); }
+  atomic() { return (85 + this.data.levels.atomic * 30) * Growth.levelMult(this.data.level) * Growth.districtScale(this.data.district) * (1 + (this.data.morph.beamBoost || 0)); }
   speed() { return (30 + Math.sqrt(this.data.levels.stride) * 8) * (1 + (this.data.morph.speedBoost || 0)); }
   nextXP() { return Math.round(260 * Math.pow(this.data.level, 1.28)); }
   cost(key) { return Math.round(STATS[key].base * Math.pow(1.22, this.data.levels[key] - 1)); }
@@ -661,7 +693,7 @@ const api = {
   Economy, STATS, SKILLS, defaults, sanitize,
   TALENT_RINGS, TALENT_NODES, TALENT_BY_ID, RING_GATE,
   MUTATIONS, MUTATION_BY_ID, RARITY, RARITY_BY_KEY, FACE_WEIGHTS, CATEGORY_SHARE,
-  EPOCHS, STAGES, stageIndexFor, epochIndexFor, globalScaleFor,
+  Growth, EPOCHS, STAGES, stageIndexFor, epochIndexFor, globalScaleFor,
   hashSeed, mulberry32, mutateFor, rarityTableFor,
   Ke, Kb, xpPerEnemy, xpPerBuilding, xpPerDistrict,
 };

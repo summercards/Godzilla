@@ -16,12 +16,10 @@
  *   本文件不重复声明任何等级阈值，只按序号与 EPOCHS 对齐，
  *   由 validate() + 测试保证两边长度与名称一致，避免出现第二套成长阶梯。
  *
- * 三个轴当前的落地程度（详见 docs/资产规范.md §5）：
- *   样式  已生效：解析出的路径会真的被 rig.js 加载。
- *   大小  已生效：改 size 只改挂点缩放，装配不脱节。
- *   颜色  已声明但对 12 个骨骼槽「只记录不施加」——
- *         对已验收的像素部件做调色板重映射会改变轮廓边缘，本版不动它；
- *         目前真正生效的是装饰槽的叠色与辉光（见 decor()）。
+ * 三轴：样式/颜色通过独立无鳍皮肤落地，大小绕原枢轴缩放。
+ * defaultSkin 是原图重组基准；skinFor 是游戏成长皮肤，不混用。
+ * 背鳍始终是独立精灵，按 growth 门禁和数量绘制，不再烘回身体。
+ * 四组派生皮肤同尺寸同 alpha；原始 default.png 保持只读。
  * ------------------------------------------------------------------ */
 (function (root) {
   'use strict';
@@ -31,6 +29,13 @@
     : root.KaijuAssets;
 
   if (!idx) throw new Error('appearance.js 需要先加载 assets/asset-index.js');
+
+  /* 体征解锁门槛（背鳍 15 级等）来自 growth.js —— 本文件不自己写等级数字。 */
+  const Growth = (typeof module !== 'undefined' && module.exports)
+    ? require('./growth.js')
+    : root.KaijuGrowth;
+
+  if (!Growth) throw new Error('appearance.js 需要先加载 growth.js');
 
   /** 三个轴的名字。加轴必须同时改 toParts()/decor() 与约束文档 §5。 */
   const AXES = ['style', 'color', 'size'];
@@ -45,15 +50,15 @@
     jade: { label: '翠化', overlay: { color: '#2fae6a', alpha: 0.16 } },
   };
 
-  /** 形态：呈现层，按序号与 EPOCHS 对齐（[0]=幼兽 … [4]=灾厄体）。
-   *  styles 为空表示"该形态沿用各槽位的默认贴图"——现在就是这种情况，
-   *  等美术产出 parts/<槽位>/<形态样式>.png 后，把样式名填进来即可生效。 */
+  /** 形态按序号与 EPOCHS 对齐。bodyStyle 是全身底色；styles 仅覆盖单槽。
+   *  finHeight 是未乘体型的美术高度，不参与战斗数值。门槛仍只读 Growth。
+   *  突变体色优先于形态底色，升级不会抹掉已获得的赤化/白化等外观。 */
   const FORMS = [
-    { id: 'juvenile', label: '幼兽', styles: {}, size: {} },
-    { id: 'subadult', label: '亚成体', styles: {}, size: {} },
-    { id: 'adult', label: '成体', styles: {}, size: {} },
-    { id: 'perfect', label: '完全体', styles: {}, size: {} },
-    { id: 'cataclysm', label: '灾厄体', styles: {}, size: {} },
+    { id: 'juvenile', label: '幼兽', bodyStyle: 'clean', finHeight: 70, styles: {}, size: {} },
+    { id: 'subadult', label: '亚成体', bodyStyle: 'jade', finHeight: 78, styles: {}, size: {} },
+    { id: 'adult', label: '成体', bodyStyle: 'frost', finHeight: 86, styles: {}, size: {} },
+    { id: 'perfect', label: '完全体', bodyStyle: 'ember', finHeight: 90, styles: {}, size: {} },
+    { id: 'cataclysm', label: '灾厄体', bodyStyle: 'void', finHeight: 94, styles: {}, size: {} },
   ];
 
   const clampSize = (v) => {
@@ -79,6 +84,10 @@
   function skinFor(monsterId, formIndex, morph) {
     const skin = defaultSkin(monsterId);
     const form = FORMS[Math.max(0, Math.min(FORMS.length - 1, Number(formIndex) || 0))] || FORMS[0];
+    // 身体所有阶段都无烘焙鳍；真正的背鳍只从 decor() 的独立组件装配。
+    const hueStyles = { crimson: 'ember', albino: 'frost', jade: 'jade', obsidian: 'clean' };
+    const style = hueStyles[morph && morph.hue] || form.bodyStyle;
+    for (const slot of idx.SLOTS) skin.slots[slot].style = style;
     for (const slot of Object.keys(form.styles)) {
       if (skin.slots[slot]) skin.slots[slot].style = form.styles[slot];
     }
@@ -140,24 +149,35 @@
     const m = inputs.morph || {};
     const t = inputs.talents || {};
     const epoch = inputs.epoch || {};
+    const level = Number(inputs.level) || 1;
     const elementColor = inputs.elementColor || null;
 
-    const talentSpines = t.spines || 0;
-    const extraSpines = m.spikes || 0;
-    const spikeScale = m.spikeScale || 1;
+    /* 背鳍 15 级才解锁（门槛在 growth.GATES.spines）。
+     * 解锁前一切背鳍相关的量强制归零 —— 包括天赋与突变带来的加成：
+     * 旧档里可能已经写着 spikeScale / spikes，但那不代表幼兽该长背鳍。
+     * 老实现是 `2 + (epoch.spikes || 3) + ...`，两个毛病：
+     *   ① epoch.spikes 幼兽档是 3，于是 1 级就有 3 根；
+     *   ② `|| 3` 让"想设成 0"变成"设成 3"，门槛根本没法表达。 */
+    const spinesOn = Growth.unlocked('spines', level);
+    const talentSpines = spinesOn ? (t.spines || 0) : 0;
+    const extraSpines = spinesOn ? (m.spikes || 0) : 0;
+    const spikeScale = spinesOn ? (m.spikeScale || 1) : 1;
 
     const horns = m.horns || 0;
     const overlay = (m.hue && PALETTES[m.hue] && PALETTES[m.hue].overlay) || null;
 
     return {
       form: form.id,
-      /* 背鳍：沿尾尖→头部的脊线分布，数量与高度受形态/天赋/突变三者叠加。 */
+      /* 背鳍：根数由 growth.spineCount() 按等级给（15 级 2 根，之后每 12 级 +1），
+       * 天赋与突变只做加法，门槛本身不受它们影响。 */
       spikes: {
-        count: 2 + (epoch.spikes || 3) + talentSpines + extraSpines,
+        count: Growth.spineCount(level, talentSpines + extraSpines),
         heightScale: (1 + 0.2 * talentSpines) * spikeScale,
         bonus: extraSpines,
-        color: elementColor || epoch.color || '#3a6b4a',
-        fork: talentSpines >= 1 || spikeScale > 1.1,
+        color: elementColor || ({ ember: '#ff8b42', frost: '#a6eaff', jade: '#65f5a0', void: '#c391ff', clean: '#54d9ff' }[skinFor('godzilla', FORMS.indexOf(form), m).slots.torso.style]),
+        height: form.finHeight || FORMS[0].finHeight,
+        sprite: 'crown',
+        fork: spinesOn && (talentSpines >= 1 || spikeScale > 1.1),
       },
       plates: { on: (m.plates || 0) > 0, count: m.plates || 0 },
       horns: { count: horns, blades: horns > 1 ? 2 : 1, heightPx: 58 + (horns > 1 ? 8 : 0) },
@@ -198,6 +218,8 @@
 
     const knownStyles = Object.keys(m.styles);
     for (const form of FORMS) {
+      if (!knownStyles.includes(form.bodyStyle)) problems.push(`形态 ${form.id} 的身体皮肤未登记：${form.bodyStyle}`);
+      if (!(form.finHeight > 0)) problems.push(`形态 ${form.id} 缺少背鳍美术高度`);
       for (const [slot, style] of Object.entries(form.styles)) {
         if (!idx.SLOTS.includes(slot)) problems.push(`形态 ${form.id} 引用了不存在的槽位 ${slot}`);
         if (!knownStyles.includes(style)) problems.push(`形态 ${form.id} 的 ${slot} 引用了未登记的样式 ${style}`);

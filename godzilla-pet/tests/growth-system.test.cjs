@@ -1,7 +1,9 @@
 /* 成长系统数值层的契约测试
  *
- * 对应 doc/game-design/06-成长系统.md。这里钉住的是几条"破了就会毁掉
- * 产品"的性质，尤其是确定性随机 —— 决定外观的随机绝不能交给 Math.random。
+ * 权威描述在 `tv/DESIGN.md` 的「成长与体貌」一节；数值单一真源是 `tv/growth.js`。
+ * （`doc/README.md` 里列的 `game-design/06-成长系统.md` 目前尚未写，别照着找。）
+ * 这里钉住的是几条"破了就会毁掉产品"的性质，尤其是确定性随机 ——
+ * 决定外观的随机绝不能交给 Math.random。
  */
 'use strict';
 
@@ -117,13 +119,80 @@ test('体征期：由等级推导，25/50/75/100 各一个台阶', () => {
   e.data.level = 100; assert.equal(e.epoch().name, '灾厄体');
 });
 
-/* 体型缩放：上限 1.80 硬约束 */
-test('体型：globalScale 封顶 1.80', () => {
-  const e = new P.Economy({ version: 4 });
-  e.data.level = 200;
-  e.data.talents = { mass: 3, magma: 3 };
-  e.data.morph = { ...e.data.morph, colossal: 5, extraScale: 1 };
-  assert.ok(e.globalScale() <= 1.800001, `体型 ${e.globalScale()} 越过了 1.80 上限`);
+/* 体型缩放：成长外观的第一组硬约束。1 级要小、随等级看得见地长、封顶 1.12。
+ * L1 / L15 / L25 / L50 四个锚点是后续策划案接进来的接口，破了任何一条都要红。 */
+test('体型：1 级最小、随等级单调增长、封顶 1.12', () => {
+  const s = (lv, t, m) => P.globalScaleFor(lv, t || {}, m || {});
+  assert.equal(+s(1).toFixed(4), 0.34, '1 级幼兽体型应当是 0.34');
+  assert.equal(+s(15).toFixed(4), 0.48, '15 级体型应当是 0.48');
+  assert.equal(+s(25).toFixed(4), 0.58, '25 级亚成体体型应当是 0.58');
+  assert.equal(+s(50).toFixed(4), 0.76, '50 级成体体型应当是 0.76');
+  let prev = 0;
+  for (let lv = 1; lv <= 300; lv++) {
+    const cur = s(lv);
+    assert.ok(cur >= prev - 1e-12, `体型在 ${lv} 级倒退了：${prev} -> ${cur}`);
+    assert.ok(cur <= 1.120001, `体型 ${cur} 越过了 1.12 上限`);
+    prev = cur;
+  }
+  const stacked = s(200, { mass: 3, magma: 3 }, { colossal: 5, extraScale: 1 });
+  assert.ok(stacked <= 1.120001 && stacked > 1.0, `叠满加成的体型 ${stacked} 应当贴在 1.12 上限`);
+  /* 1 级到 50 级必须长出看得见的量：0.34 -> 0.76 是 2.24 倍。
+   * 低于 1.5 倍就说明曲线又被压平了（旧的饱和指数就会这样）。 */
+  assert.ok(s(50) / s(1) > 1.5, '50 级体型相对 1 级必须明显变大');
+});
+
+/* 背鳍门禁：15 级之前是"没有这个部件"，不是"画得小"。
+ * 突变池也必须同步门禁，否则"随机背鳍变化在 15 级之后"这条承诺落空。 */
+test('背鳍：15 级前为 0，15 级起出现，突变池同样被挡住', () => {
+  const Growth = require('../tv/growth.js');
+  assert.equal(Growth.GATES.spines, 15, '背鳍门槛就是 15 级');
+  for (let lv = 1; lv < 15; lv++) {
+    assert.equal(Growth.unlocked('spines', lv), false, `${lv} 级不该解锁背鳍`);
+    assert.equal(Growth.spineCount(lv), 0, `${lv} 级背鳍数必须是 0`);
+  }
+  assert.equal(Growth.spineCount(15), 2, '15 级背鳍首次出现，2 片');
+  assert.equal(Growth.spineCount(27), 3, '之后每 12 级 +1');
+  assert.ok(Growth.spineCount(99) > Growth.spineCount(15), '门槛之上必须还在长');
+  for (let lv = 1; lv < 15; lv++) {
+    for (let k = 0; k < 200; k++) {
+      const m = P.mutateFor(1000 + k, lv);
+      if (m) assert.notEqual(m.part, 'spikes', `${lv} 级抽到了背鳍突变（seed ${1000 + k}）`);
+    }
+  }
+  let hit = false;
+  for (let k = 0; k < 500 && !hit; k++) { const m = P.mutateFor(7000 + k, 15); if (m && m.part === 'spikes') hit = true; }
+  assert.ok(hit, '15 级之后必须真能抽到背鳍突变，否则门禁把池子锁死了');
+});
+
+/* 受击范围 = 体型。这是"小体型时子弹打在空中"的根因回归：
+ * 命中盒必须由 rig 骨骼数据算出，与渲染共用同一个脚底锚点和同一个缩放系数。 */
+test('受击范围：跟着体型缩放，底部锚在脚底，不再打在空中', () => {
+  const Rig = require('../tv/rig.js');
+  const G = 590, X = 400;
+  const small = Rig.hitbox(0.34, X, G), big = Rig.hitbox(1.12, X, G);
+  assert.equal(small.y1, G, '命中盒底边必须正好落在脚底');
+  assert.equal(big.y1, G, '体型放大后底边仍然锚在脚底');
+  assert.equal(+((big.x1 - big.x0) / (small.x1 - small.x0)).toFixed(4), +(1.12 / 0.34).toFixed(4), '命中盒尺寸必须与体型严格成正比');
+  assert.ok(small.x0 < X && small.x1 > X, '命中盒以角色 x 为中心展开');
+  /* 关键回归：1 级的可命中高度只有满体型的不到三分之一。
+   * 旧实现把判定写死在 G-350，小体型的子弹全飞过身体 —— 这一条就是那道断言。 */
+  const reachSmall = G - small.y0, reachBig = G - big.y0;
+  assert.ok(reachSmall < reachBig / 3, `1 级可命中高度 ${reachSmall} 必须远低于满体型 ${reachBig}`);
+  assert.ok(reachSmall > 100, `1 级也得有 ${reachSmall}px 的可命中高度，别把判定缩成一条线`);
+});
+
+/* 攻击力回到初始：等级不再乘攻击力（策划要求"回到初始状态"），
+ * 但区域必须仍然加成，否则后期建筑一硬就再也打不动。 */
+test('攻击力：等级不再加成，区域系数仍然生效', () => {
+  const Growth = require('../tv/growth.js');
+  const a = new P.Economy({ version: 4 });
+  const p1 = a.power(), k1 = a.atomic();
+  a.data.level = 80;
+  assert.equal(a.power(), p1, '等级不该改变攻击力');
+  assert.equal(a.atomic(), k1, '核能攻击同样不吃等级');
+  const b = new P.Economy({ version: 4 });
+  b.data.district = 20;
+  assert.equal(+(b.power() / p1).toFixed(6), +(1 + 19 * Growth.DISTRICT.coef).toFixed(6), '区域系数应为 1+(d-1)×DISTRICT.coef');
 });
 
 /* 旧档迁移：version 3 必须能读，且补齐新字段（这是最容易犯的致命错） */
@@ -220,4 +289,78 @@ test('经验曲线：单价随区域单调递增，且第 1 区与旧写死值�
   }
   assert.equal(P.Ke(1), 1);
   assert.equal(P.Kb(1), 1);
+});
+
+/* ------------------------------------------------------------------ *
+ * 以下三条守住"单一真源"这件事本身。
+ *
+ * growth.js 声称是成长数值的唯一出处，但光靠注释声明是守不住的：
+ * 2026-09-17 那次重构之前，体型曲线同时存在于 game.js、progression.js
+ * 两个文件里，两个上限（1.12 / 1.80）谁也不认谁。所以下面每条都用
+ * "会失败的断言"而不是注释来钉 —— 注释几个月后就没人记得了。
+ * ------------------------------------------------------------------ */
+
+/* 区域系数同源：巨兽伤害倍率与建筑耐久倍率必须是同一个函数。
+ *
+ * 破了会怎样：建筑耐久 = 基础值 × Kb(d)（game.js 的 generateWorld），
+ * 巨兽伤害 × districtScale(d)。两个系数一旦分叉，推图几十个区域之后
+ * 要么楼是纸糊的、要么怎么打都打不动 —— 而且没有任何报错。 */
+test('区域系数：建筑耐久与巨兽伤害严格同源，且跟着唯一系数走', () => {
+  const Growth = require('../tv/growth.js');
+  assert.ok(Growth.DISTRICT && typeof Growth.DISTRICT.coef === 'number', '系数必须住在 growth.DISTRICT 里');
+  for (let d = 1; d <= 200; d++) {
+    const expected = 1 + (d - 1) * Growth.DISTRICT.coef;
+    assert.equal(P.Kb(d), expected, `区域 ${d}：建筑耐久系数没跟着 growth.DISTRICT.coef 走`);
+    /* 伤害侧还要额外过 COMBAT.districtScaling 这道开关；开关关掉时它恒为 1，
+     * 那是有意的（"纯初始状态"），但开关打开时它必须与 Kb 是同一个数。 */
+    if (Growth.COMBAT.districtScaling) {
+      assert.equal(
+        Growth.districtScale(d), expected,
+        `区域 ${d}：巨兽伤害倍率 ${Growth.districtScale(d)} 与建筑耐久系数 ${expected} 分叉了`
+      );
+    }
+  }
+  /* 敌人经验系数是另一条独立设计（0.19），不该被上面这条同源契约带跑。
+   * 它低于建筑系数是有意的：巨兽拆楼效率随区域提升，对敌则越来越吃力。 */
+  assert.ok(P.Ke(2) < P.Kb(2), '敌人系数应当低于建筑系数，这是有意的设计差');
+});
+
+/* 体征门槛：未登记的 feature 一律不解锁。
+ *
+ * 破了会怎样：appearance.js / progression.js 把 'spines' 敲成 'spine'，
+ * 老写法 `GATES[f] || 0` 会拿到门槛 0 → "任何等级都解锁"，且零报错：
+ * 1 级幼兽直接长出背鳍，而所有测试照样绿。 */
+test('体征门槛：未登记一律不解锁，已登记的按门槛值判定', () => {
+  const Growth = require('../tv/growth.js');
+  assert.equal(Growth.unlocked('__not_registered__', 1e9), false, '没登记的门槛绝不能因为等级高就放行');
+  assert.equal(Growth.unlocked('spine', 1e9), false, '拼错一个字母（spine）必须不解锁，而不是静默放行');
+  for (const feature of Object.keys(Growth.GATES)) {
+    const gate = Growth.GATES[feature];
+    assert.equal(Growth.unlocked(feature, gate), true, `${feature} 在门槛那一级应当解锁`);
+    if (gate > 1) {
+      assert.equal(Growth.unlocked(feature, gate - 1), false, `${feature} 在门槛前一级不该解锁`);
+    }
+  }
+});
+
+/* 消费侧与门槛表的对应：代码里用到的每个门槛名都必须在 GATES 里登记。
+ * 这条同时兜住"策划案加了新门槛但忘了登记"和"名字写错"两种情形。 */
+test('体征门槛：消费侧引用的门槛名全部已在 GATES 登记', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const Growth = require('../tv/growth.js');
+  const tv = path.join(__dirname, '..', 'tv');
+  const src = ['appearance.js', 'progression.js', 'game.js']
+    .map((f) => fs.readFileSync(path.join(tv, f), 'utf8'))
+    .join('\n');
+  const used = new Set();
+  for (const m of src.matchAll(/(?:unlocked\(\s*'|GATES\.)([A-Za-z_]\w*)/g)) used.add(m[1]);
+  assert.ok(used.size > 0, '没有扫到任何门槛引用，正则可能失配了');
+  for (const name of used) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(Growth.GATES, name),
+      `代码里用了门槛 '${name}'，但 growth.GATES 里没有登记 —— 它会被判成"永不解锁"`
+    );
+  }
+  assert.ok(used.has('spines'), '背鳍门槛必须仍在被消费，否则这条测试失去意义');
 });
