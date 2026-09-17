@@ -10,15 +10,9 @@
  *   3. 主进程掌控窗口生命周期，能在退出、崩溃、系统重启前把数据落盘。
  *
  * ── 写入是原子的 ──────────────────────────────────────────────────────
- * 顺序固定为：写临时文件 → fsync → 主档改名成备份 → 临时文件改名成主档。
- * 两次改名都是原子的，所以任何时刻磁盘上都至少有一份完整可读的档：
- *
- *   崩在这里 ↓              磁盘状态                        读取结果
- *   ────────────────────────────────────────────────────────────────
- *   写 tmp 途中              main 完好                       读到旧档
- *   tmp 写完、未改名         main 完好                       读到旧档
- *   main→bak 已改名          bak 完好、main 缺失              读到备份
- *   tmp→main 已改名          main 是新档                      读到新档
+ * 顺序固定为：可读主档原子复制到备份 → 新档写临时文件并 fsync → 原子替换主档。
+ * 主档不提前挪走，写入失败时仍保留原件；损坏的主档不会覆盖可读备份。
+ * 临时文件写入或替换失败时保留现场，不删除任何文件。
  *
  * 代价是备份永远落后一个存档周期（5 秒），换来的是"永远不会读到半个 JSON"。
  *
@@ -113,21 +107,14 @@ function createStore(options) {
     /* 写入。返回 { ok, bytes, error }，不抛异常 —— 磁盘满了、目录只读、
      * 被安全软件锁住，这些都不该让桌宠崩掉，写失败保持上一份存档就好。 */
     write(payload) {
-      const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
       try {
+        const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
         ensureDir();
-        // 轮转：主档先退位成备份。它此刻是好是坏都无所谓，下一步就有新档顶上。
-        if (fs.existsSync(file)) {
-          try {
-            fs.renameSync(file, backup);
-          } catch {
-            /* 备份轮转失败不阻塞写入：宁可没有备份，也不能不存档 */
-          }
-        }
+        // 备份失败就中止，不能牺牲可恢复性；坏主档也不能污染好备份。
+        if (readOne(file)) atomicWrite(backup, fs.readFileSync(file, 'utf8'));
         atomicWrite(file, text);
         return { ok: true, bytes: Buffer.byteLength(text), error: null };
       } catch (error) {
-        try { fs.rmSync(tmp, { force: true }); } catch { /* 清理失败无所谓 */ }
         return { ok: false, bytes: 0, error: String((error && error.message) || error) };
       }
     },
@@ -154,12 +141,14 @@ function createStore(options) {
      * 挑哪一份拷要按"读得出来"来判断，而不是"文件在不在" —— 主档存在但内容
      * 已经损坏时，那个文件是垃圾，真正能救的是备份。只看 existsSync 的话，
      * 用户点了「导出备份」会拿到一个同样打不开的文件，还以为自己救下来了。 */
-    exportTo(dest) {
+    exportTo(dest, { exclusive = false } = {}) {
       const src = readOne(file) ? file : (readOne(backup) ? backup : null);
       if (!src) return { ok: false, error: '没有可导出的存档' };
       try {
         ensureDir();
-        fs.copyFileSync(src, dest);
+        fs.copyFileSync(src, dest, exclusive ? fs.constants.COPYFILE_EXCL : 0);
+        const fd = fs.openSync(dest, 'r+');
+        try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
         return {
           ok: true,
           from: src,

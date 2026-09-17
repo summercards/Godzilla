@@ -9,18 +9,49 @@ const Growth=require('../growth.js');
 let e=new Economy();assert.equal(e.speed(),38,'heavier initial walking speed');e.data.levels.stride=4;assert.equal(e.speed(),46,'stride upgrades still improve speed');e.data.levels.stride=1;assert(e.upgrade('power'));assert.equal(e.data.levels.power,2);e.data.energy=0;let before=e.data.energy;assert(!e.upgrade('atomic'));assert.equal(e.data.energy,before);e.data.dna=9;assert(!e.unlock('meltdown'),'prerequisite enforced');assert(e.unlock('pierce'));assert(e.unlock('chain'));assert(e.unlock('meltdown'));assert(!e.unlock('meltdown'));e.data.energy=10000;e.data.policy='atomic';assert.equal(e.data.auto,true,'default is auto-managed');e.autoSpend();assert(e.data.levels.atomic>1,'default auto-spends nuclear reserves');let ecOff=new Economy({version:4,auto:false,energy:10000,policy:'atomic'});ecOff.autoSpend();assert.equal(ecOff.data.energy,10000,'auto=false preserves nuclear reserves');
 let off=new Economy();off.data.lastSeen=Date.now()-12*3600*1000;let report=off.offline(Date.now());assert.equal(report.seconds,28800);assert(report.capped);assert.equal(off.offline(Date.now()),null,'offline credit cannot duplicate');let saved=new Economy(JSON.parse(off.serialize(Date.now(),{x:900})));assert.equal(saved.data.energy,off.data.energy);assert.equal(saved.data.world.x,900);let bad=new Economy({version:3,energy:-5,levels:{power:-2},level:'oops',dna:NaN,skills:['hack']});assert.equal(bad.data.energy,0);assert.equal(bad.data.levels.power,1);assert.deepEqual(bad.data.skills,[]);console.log('PASS economy: upgrade pricing, prerequisites, policies, save, offline cap and sanitization');
 let pose1=Rig.pose({x:400,ground:590,moving:true,step:0,action:{name:'walk',t:0}},0),pose2=Rig.pose({x:400,ground:590,moving:true,step:1.5,action:{name:'walk',t:0}},1);assert.notEqual(pose1.bones.shin.a,pose2.bones.shin.a);assert.notEqual(pose1.bones.tail_tip.a,pose2.bones.tail_tip.a);for(let name of ['claw','beam','stomp','roar','tail']){let pose=Rig.pose({x:400,ground:590,step:0,angle:.3,action:{name,t:.7}},1);assert(Object.values(pose.bones).every(b=>Number.isFinite(b.x)&&Number.isFinite(b.y)&&Number.isFinite(b.a)));}console.log('PASS rig: independent limb motion, parent transforms and all animation states');
-let nodes=new Map(),listeners={},storage=new Map();let grad={addColorStop(){}};let ctx=new Proxy({createLinearGradient:()=>grad},{get:(t,k)=>k in t?t[k]:(()=>{}),set:(t,k,v)=>(t[k]=v,true)});function node(id){if(!nodes.has(id)){let el={style:{setProperty(){}},dataset:{},classList:{toggle(){},add(){},remove(){}},setAttribute(){},getContext:()=>ctx,hidden:false,textContent:'',innerHTML:'',disabled:false,querySelector:()=>({textContent:'',style:{setProperty(){}}}),querySelectorAll:()=>[]};nodes.set(id,el);}return nodes.get(id);}
+let nodes=new Map(),listeners={},storage=new Map();let grad={addColorStop(){}};let ctx=new Proxy({createLinearGradient:()=>grad},{get:(t,k)=>k in t?t[k]:(()=>{}),set:(t,k,v)=>(t[k]=v,true)});function node(id){if(!nodes.has(id)){let el={style:{setProperty(){}},dataset:{},classList:{toggle(){},add(){},remove(){}},setAttribute(){},getContext:()=>ctx,hidden:id==='management',textContent:'',innerHTML:'',disabled:false,querySelector:()=>({textContent:'',style:{setProperty(){}}}),querySelectorAll:()=>[],children:[]};nodes.set(id,el);}return nodes.get(id);}
 class ImageMock{set src(v){this.complete=true;this.naturalWidth=300;this.naturalHeight=300;queueMicrotask(()=>this.onload?.());}}
 let randomSeed=76123;const testMath=Object.create(Math);testMath.random=()=>{randomSeed=(Math.imul(randomSeed,1664525)+1013904223)>>>0;return randomSeed/4294967296;};
-const window={IdleProgression:{Economy,STATS,SKILLS,TALENT_RINGS,TALENT_NODES,TALENT_BY_ID,RING_GATE,MUTATIONS,MUTATION_BY_ID,RARITY,RARITY_BY_KEY,FACE_WEIGHTS,EPOCHS,epochIndexFor,globalScaleFor,STAGES,stageIndexFor,hashSeed,mulberry32,mutateFor,rarityTableFor,Ke,Kb,xpPerEnemy,xpPerBuilding,xpPerDistrict,sanitize},KaijuRig:Rig,KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,addEventListener:(k,f)=>listeners[k]=f};let sandbox={window,KaijuRig:{...Rig,Skeleton:class{constructor(parts){this.parts=parts;this.ready=true;this.loaded=Promise.resolve(true);}draw(){}},FinRenderer:class{draw(){}}},KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,console,Math:testMath,Set,Array,Map,Date,String,Number,Image:ImageMock,document:{getElementById:node,createElement:()=>node(Math.random()),hidden:false,addEventListener:(k,f)=>listeners[k]=f,body:{classList:{toggle(){}}}},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},performance:{now:()=>0},requestAnimationFrame(){},setTimeout(fn){fn();return 0;}};
-let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,worldSnapshot,broadcast,get breakCd(){return breakingCd;},get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
+const window={IdleProgression:require('../progression.js'),KaijuRig:Rig,KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,addEventListener:(k,f)=>listeners[k]=f};let sandbox={window,KaijuRig:{...Rig,Skeleton:class{constructor(parts){this.parts=parts;this.ready=true;this.loaded=Promise.resolve(true);}draw(){}},FinRenderer:class{draw(){}}},KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,console,Math:testMath,Set,Array,Map,Date,String,Number,Image:ImageMock,document:{getElementById:node,createElement:()=>node(Math.random()),hidden:false,addEventListener:(k,f)=>listeners[k]=f,body:{classList:{toggle(){}}}},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},performance:{now:()=>0},requestAnimationFrame(){},setTimeout(fn){fn();return 0;}};
+let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,worldSnapshot,broadcast,requestNextMap,get breakCd(){return breakingCd;},get mapGate(){return mapGate;},get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
 let main=api.state.buildings.find(b=>b.layer===1);assert(main.max>=780);api.damageBuilding(main,api.state.economy.power(),'claw');api.damageBuilding(main,api.state.economy.power(),'claw');assert(!main.dead&&main.hp>main.max*.7,'main building survives repeated initial claws');
 let currentSave=api.worldSnapshot(),ratio=main.hp/main.max,id=main.id;api.generateWorld(currentSave);assert(Math.abs(api.state.buildings.find(b=>b.id===id).hp/api.state.buildings.find(b=>b.id===id).max-ratio)<1e-9,'new save preserves damage ratio');
 api.generateWorld({district:1,x:420,buildings:[{id,hp:115,dead:false},{id:'1-1',hp:0,dead:true}]});main=api.state.buildings.find(b=>b.id===id);assert.equal(main.hp/main.max,.5,'legacy save retains half damaged condition');assert(api.state.buildings.find(b=>b.id==='1-1').dead,'legacy ruins stay destroyed');api.generateWorld();
 console.log('PASS tougher buildings: multiple hits, current save and legacy damage migration');
 let seen=new Set(),crashSeen=false,counts={},previousAction=null;for(let i=0;i<(process.argv.includes('--long')?1800:600)*60;i++){api.update(1/60);seen.add(api.state.p.action.name);if(api.state.p.action!==previousAction){previousAction=api.state.p.action;counts[previousAction.name]=(counts[previousAction.name]||0)+1;}if(api.state.crashCount>0)crashSeen=true;if(i%1200===0)api.render();if(api.state.data.district>=(process.argv.includes('--long')?6:3))break;}
+/* 换图现在必须确认（产品决定：路段末端只立起「进入下一张地图」的闸门，
+ * 不再自动推进 —— 见 game.js 的 mapGate）。所以挂机判定要拆成两半：
+ * 挂机本身必须走到末端把闸门立起来，确认一次之后区域才推进。 */
+if(api.state.data.district<2)assert(api.requestNextMap(),'挂机必须走到路段末端并立起换图闸门');
 let s=api.state;console.log('IDLE RUN',JSON.stringify({district:s.data.district,level:s.data.level,buildings:s.data.cleared,kills:s.data.kills,crashes:s.crashCount,stats:s.data.levels,skills:s.data.skills,actions:[...seen],counts}));assert(s.data.district>=2,'autonomous progression clears first district');assert(s.data.level>=3,'combat XP accumulates levels');assert(s.data.cleared>40);assert(s.data.skills.length>=1);assert(s.data.levels.power+s.data.levels.atomic+s.data.levels.metabolism+s.data.levels.stride>4,'auto-managed run must actually spend on upgrades');assert(crashSeen,'airborne destruction reaches ground explosion');for(let name of ['walk','claw','beam','stomp','roar','tail'])assert(seen.has(name),'AI selects '+name);assert(s.p.x>400);assert(s.p.hp===undefined,'player has no health/death mechanic');api.save();let payload=JSON.parse(storage.get('gnn-kaiju-idle-v3'));assert.equal(payload.world.district,s.data.district);assert(s.particles.length<=700);assert(s.fires.length<=60);console.log('PASS autonomous world: districts, skills, all attacks, airborne crashes, persistence, bounded particles');
 assert((counts.claw||0)+(counts.stomp||0)+(counts.tail||0)>(counts.beam||0)*3,'melee dominates automatic combat');console.log('PASS combat pacing: melee actions exceed laser casts by more than 3 to 1');
+/* 章节边界实跑：不依赖等级门槛，强制将路段推过 5→6、10→11、15→16。 */
+const levelBeforeChapters=api.state.data.level;
+for (const edge of [5,10,15,16,100]) {
+  api.state.data.district=edge;api.generateWorld();api.state.p.action={name:'walk',t:0};api.state.p.x=4550;api.update(1/60);
+  /* 走到末端只立闸门，换图要确认一次 —— 这就是玩家在功能面板点的那一下。 */
+  assert(api.mapGate,'区域边界 '+edge+'→'+(edge+1)+' 必须立起换图闸门');
+  assert(api.requestNextMap(),'区域边界 '+edge+'→'+(edge+1)+' 的换图请求必须被接受');
+  assert.equal(api.state.data.district,edge+1,'区域边界 '+edge+'→'+(edge+1)+' 必须切换');
+  const route=window.IdleProgression.routeFor(edge+1);
+  /* 电视左上只显示城市名 —— 街区名归滚动条，不占主屏（产品决定）。 */
+  assert(node('location').textContent.includes(route.chapter.name),'位置必须显示当前城市');
+  api.save();const payload=JSON.parse(storage.get('gnn-kaiju-idle-v3')),restoredWindow={...window};
+  vm.runInNewContext(src,{...sandbox,window:restoredWindow});const restored=restoredWindow.test;
+  assert.equal(restored.state.data.district,edge+1,'重新启动必须恢复区域');assert.equal(restored.state.data.level,payload.level,'重新启动不能重置等级');
+  assert.equal(restored.state.data.energy,payload.energy,'恢复不能重置核能');assert.equal(restored.state.data.seed,payload.seed,'恢复不能改突变种子');
+  assert.equal(restored.worldSnapshot().stage,payload.world.stage,'旧 world.stage 必须保留');assert.equal(restored.state.p.x,payload.world.x,'恢复不能重置路段位置');
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.worldSnapshot())),payload.world,'恢复必须保留建筑与固定单位状态');
+  assert(!Object.hasOwn(payload,'chapter'),'章节不得新增存档字段');
+  /* 滚动条每滚满一屏（1200px / 48px 每秒）才提交一次，所以给足秒数再断言，
+   * 而不是只看一帧 —— 这里同时验证"新区域必须自动继续行走"和"不能残留旧城区"。 */
+  const x0=restored.state.p.x,meters0=restored.state.data.meters;
+  for(let i=0;i<1800;i++)restored.update(1/60);
+  assert(restored.state.p.x>x0,'新区域加载后应自动继续行走');
+  assert(restored.state.data.meters>meters0,'新区域必须继续累计里程');
+  assert(node('tickerText').textContent.includes(route.street.name),'切换后滚动条必须换成新街区，不能残留旧城区');
+}
+assert(api.state.data.level>=levelBeforeChapters,'跨章节不能重置等级');console.log('PASS chapter boundaries: 5→6, 10→11, 15→16, 16→17, 100→101 and full save restore');
 /* 加点不自动花（见 progression.js autoSpend），所以电视主界面必须自己常驻显示未花点数 ——
  * 否则玩家挂机回来在主界面看不到"有几点没花"，保留纯手动的产品决定就落空了。 */
 let hb=nodes.get('assignHudBadge');assert(hb,'HUD assign badge element exists in index.html');assert(Number(hb.textContent)>0&&hb.hidden===false,'HUD badge shows pending assign points without opening the panel');console.log('PASS HUD badge: unspent assign points are visible on the TV main screen');
@@ -95,4 +126,19 @@ assert.equal(lt.hidden, 'SENTINEL', '释放原子吐息不该拉起突发新闻�
  * 不能比长度（长度早就顶到上限了，涨不上去）。 */
 assert(/(高能反应|红莲临界)/.test(api.state.news[0].title), '技能播报仍要进现场档案（它只是不抢画面），实际是「' + api.state.news[0].title + '」');
 console.log('PASS breaking news: skill casts never raise the banner, other events are gated to one per minute');
+
+/* 隔离门卫停距：所有范围技锁冷却，必须真的挥爪命中，而不是等待重踏救场。 */
+for (const level of [1,15,100]) {
+  const gateSave={...window.IdleProgression.defaults(),level,district:16,auto:false,world:{district:16,stage:'city',x:420},lastSeen:Date.now()};
+  storage.set('gnn-kaiju-idle-v3',JSON.stringify(gateSave));const gateWindow={...window};vm.runInNewContext(src,{...sandbox,window:gateWindow});const g=gateWindow.test;
+  g.state.buildings.length=0;const gate=g.state.enemies.find(e=>e.gate);assert(gate,'恢复的 city 阶段必须生成门卫');
+  g.state.enemies.splice(0,g.state.enemies.length,gate);g.state.p.x=gate.x-190;
+  g.state.p.cooldowns={beam:9999,stomp:9999,tail:9999,roar:9999};const hp=gate.hp;
+  for(let i=0;i<6*60&&gate.hp===hp;i++)g.update(1/60);
+  assert(gate.hp<hp,'LV '+level+' 必须能从原门卫停距前走入有效爪击范围');
+  g.state.enemies.length=0;g.begin('walk');const x=g.state.p.x,meters=g.state.data.meters;
+  for(let i=0;i<60;i++)g.update(1/60);
+  assert(g.state.p.x>x&&g.state.data.meters>meters,'清空路段必须持续行走并记录里程');
+}
+console.log('PASS gate melee: LV1/15/100 claws hit with all skills cooling down, empty routes keep moving');
 

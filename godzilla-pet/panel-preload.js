@@ -53,6 +53,7 @@ function forward(payload) {
 contextBridge.exposeInMainWorld('__panelHost', {
   command: forward,
   close: () => ipcRenderer.send('panel:done'),
+  resetSave: () => ipcRenderer.invoke('save:reset'),
 });
 
 function ready() {

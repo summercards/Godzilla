@@ -21,6 +21,7 @@ const { TV_DRAG_CSS, TV_TRANSPARENT_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_
 const { createStore } = require('./save-store.js');
 const { createLogger } = require('./log-store.js');
 const { createSaveGuard } = require('./save-guard.js');
+const { createResetSave, isTrustedWindowSender } = require('./save-reset.js');
 
 const ASSETS = path.join(__dirname, 'assets');
 
@@ -403,7 +404,7 @@ function placePanel() {
  * 是它自己画好的，一行都没重写。它唯一被限制的是不准写存档
  * （见 panel-preload.js），落盘由电视窗口独占，否则两个实例会互相覆盖。 */
 function openPanel(key = 'assign') {
-  if (!win || win.isDestroyed() || !PANEL_KEYS.has(key)) return;
+  if (reloading || !win || win.isDestroyed() || !PANEL_KEYS.has(key)) return;
   panelKey = key;
   win.webContents.send('tv:snapshot');
   if (panelWin && !panelWin.isDestroyed()) {
@@ -729,24 +730,15 @@ async function importSave() {
   return out;
 }
 
-async function resetSave() {
-  const ask = await pickWin('showMessageBox', {
-    type: 'warning',
-    buttons: ['取消', '重置存档'],
-    defaultId: 0,
-    cancelId: 0,
-    message: '重置桌宠存档？',
-    detail: '核能、等级、突变点、技能、破坏进度与所在城区全部归零，且无法撤销。\n存档文件和它的备份会被一起删掉。',
-  });
-  if (ask.response !== 1) return { ok: false, canceled: true, error: null };
-  const out = store().clear();
-  if (out.ok) {
-    guard().discard('reset');   // 同上：文件已经被删掉，缓存必须作废
-    logWarn('重置了存档');
-    reloadSave();
-  }
-  return out;
-}
+const resetSave = createResetSave({
+  getStore: store, getGuard: guard,
+  defaults: () => require('./tv/progression.js').defaults(),
+  isSave: isSaveV1, isReloading: () => reloading,
+  confirm: (options) => pickWin('showMessageBox', options),
+  notify: (options) => pickWin('showMessageBox', options),
+  reload: reloadSave, closePanel,
+  log: logWarn, errorLog: logWarn,
+});
 
 /* 导入/重置与自动存档之间有一场竞态：画面每 5 秒存一次盘，那一次写完全可能
  * 已经在路上，落地时间却晚于导入，于是把刚导入的档又盖回旧数据 ——
@@ -800,6 +792,10 @@ function registerSaveIPC() {
    * 的时候把它搬进文件 —— 画面一旦改用桥，那份老档就再也没人读了，
    * 只有这一次机会。搬完文件立刻存在，所以只会搬一次。 */
   ipcMain.on('tv:saveBoot', (e, legacy) => {
+    if (!win || win.isDestroyed() || e.sender !== win.webContents) {
+      e.returnValue = SAVE_BUSY;
+      return;
+    }
     reloading = false;                     // 握手应答即开闸
 
     const r = store().read();
@@ -824,8 +820,8 @@ function registerSaveIPC() {
     e.returnValue = { payload, migrated, source: r.source };
   });
 
-  ipcMain.on('tv:saveWrite', (_e, payload) => {
-    if (reloading || typeof payload !== 'string') return;
+  ipcMain.on('tv:saveWrite', (e, payload) => {
+    if (!win || win.isDestroyed() || e.sender !== win.webContents || reloading || typeof payload !== 'string') return;
     guard().save(payload);   // 失败会自己落日志，并把这一份留作退出兜底
     syncPanel(payload);
   });
@@ -834,7 +830,7 @@ function registerSaveIPC() {
    * 异步 IPC 的回调根本来不及跑，而这是退出前的最后一次落盘机会。
    * 日常的写入走异步那条，不阻塞渲染帧。 */
   ipcMain.on('tv:saveWriteSync', (e, payload) => {
-    if (reloading || typeof payload !== 'string') { e.returnValue = SAVE_BUSY; return; }
+    if (!win || win.isDestroyed() || e.sender !== win.webContents || reloading || typeof payload !== 'string') { e.returnValue = SAVE_BUSY; return; }
     e.returnValue = guard().save(payload);
     syncPanel(payload);
   });
@@ -842,7 +838,11 @@ function registerSaveIPC() {
   ipcMain.on('save:reveal', revealSave);
   ipcMain.handle('save:export', exportSave);
   ipcMain.handle('save:import', importSave);
-  ipcMain.handle('save:reset', resetSave);
+  ipcMain.handle('save:reset', (e) => {
+    const trusted = isTrustedWindowSender(e.sender, [panelWin, win]);
+    if (!trusted) return { ok: false, error: '不允许此窗口重置存档' };
+    return resetSave();
+  });
 }
 
 /* 控制按钮与面板窗口之间的三条通道。

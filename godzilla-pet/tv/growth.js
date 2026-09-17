@@ -113,6 +113,13 @@
     return SPINE.base + Math.max(0, extra) + Math.max(0, Number(bonus) || 0);
   }
 
+  /** 背鳍突变的重踏半径收益；低等级旧档也不能提前生效。 */
+  function spineBonus(level, morph) {
+    if (!unlocked('spines', level)) return 0;
+    const bonus = Number(morph && morph.stompBoost);
+    return Number.isFinite(bonus) ? Math.max(0, bonus) : 0;
+  }
+
   /* ------------------------------------------------------------------ *
    * 3 · 战斗数值
    *
@@ -163,7 +170,7 @@
   const api = {
     CEIL, GATES, SPINE, COMBAT, DISTRICT,
     baseScale, growFactor, bodyScale,
-    unlocked, spineCount,
+    unlocked, spineCount, spineBonus,
     districtScale, levelMult,
   };
 

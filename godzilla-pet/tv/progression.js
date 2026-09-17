@@ -321,6 +321,66 @@ function stageIndexFor(data) {
   return i;
 }
 
+/* 章节只由累计区域派生；纽约每五区开始新一轮，不影响成长建筑阶段或旧档。 */
+const CHAPTERS = [
+  {
+    key: 'osaka', number: 1, name: '大阪', title: '第一章 · 大阪',
+    sky: ['#160e2c', '#493354', '#b07763'], skyline: ['#35283f', '#52354a', '#654351'],
+    skyTime: 'dusk', weather: { key: 'rain', label: '黄昏细雨', color: '#8dc6ef', density: 0.62, lightning: false },
+    wall: '#8b766c', accent: '#ffad68', road: '#343044', water: '#254854',
+    landmarks: ['大阪城', '通天阁', '道顿堀霓虹'],
+    districts: [
+      { name: '城下町', color: '#dfc781', signs: ['城下食堂', 'OSAKA', '茶屋'] },
+      { name: '通天阁商店街', color: '#ffa260', signs: ['通天阁', '串烧', '新世界'] },
+      { name: '道顿堀灯街', color: '#ff70af', signs: ['道顿堀', '章鱼烧', '霓虹剧场'] },
+      { name: '中之岛水岸', color: '#66d6c5', signs: ['中之岛', '河畔咖啡', '水岸书店'] },
+      { name: '大阪港仓库街', color: '#ffc56e', signs: ['大阪港', '港湾仓库', 'OSAKA PORT'] },
+    ],
+  },
+  {
+    key: 'tokyo', number: 2, name: '东京', title: '第二章 · 东京',
+    sky: ['#07112f', '#18366a', '#586a97'], skyline: ['#132344', '#20385b', '#304c75'],
+    skyTime: 'night', weather: { key: 'storm', label: '午夜雷暴', color: '#84dfff', density: 1, lightning: true },
+    wall: '#3c5675', accent: '#75cfff', road: '#172c49', water: '#163e68',
+    landmarks: ['东京塔', '高架轨道', '新宿霓虹'],
+    districts: [
+      { name: '浅草灯笼街', color: '#ff8d75', signs: ['浅草', '灯笼商店', 'TOKYO'] },
+      { name: '秋叶原电器街', color: '#74ddff', signs: ['秋叶原', 'RADIO', '电器街'] },
+      { name: '新宿高架街', color: '#d895ff', signs: ['新宿', 'NEON', '歌舞伎町'] },
+      { name: '芝公园塔街', color: '#ff9566', signs: ['芝公园', '东京塔', 'TOWER'] },
+      { name: '湾岸货运区', color: '#80e4df', signs: ['湾岸', 'TOKYO BAY', '货运站'] },
+    ],
+  },
+  {
+    key: 'newyork', number: 3, name: '纽约', title: '第三章 · 纽约',
+    sky: ['#101c2a', '#34515e', '#b5a183'], skyline: ['#22333e', '#364651', '#4e5b61'],
+    skyTime: 'dawn', weather: { key: 'fog', label: '清晨浓雾', color: '#d4ddd2', density: 0.42, lightning: false },
+    wall: '#7b685c', accent: '#ffd379', road: '#2b3037', water: '#364e5c',
+    landmarks: ['阶梯天际线', '帝国大厦', '钢桥'],
+    districts: [
+      { name: '布鲁克林桥街', color: '#8dcacb', signs: ['BROOKLYN', 'BRIDGE', 'DELI'] },
+      { name: '华尔街石楼区', color: '#d1bf91', signs: ['WALL ST', 'COFFEE', 'EXCHANGE'] },
+      { name: '时代广场灯街', color: '#ffb26b', signs: ['TIMES SQ', 'BROADWAY', 'ARCADE'] },
+      { name: '中城摩天楼区', color: '#ffdc91', signs: ['MIDTOWN', 'EMPIRE', 'HOTEL'] },
+      { name: '哈德逊码头', color: '#90bcd5', signs: ['HUDSON', 'PIER 05', 'WAREHOUSE'] },
+    ],
+  },
+];
+function chapterFor(district) {
+  return CHAPTERS[district >= 11 ? 2 : district >= 6 ? 1 : 0];
+}
+function routeFor(district, progress = 0) {
+  const chapter = chapterFor(district), index = (district - 1) % 5;
+  const start = district - index, round = Math.floor((start - (chapter.number - 1) * 5 - 1) / 5) + 1;
+  const nextDistrict = district + 1, nextChapter = chapterFor(nextDistrict);
+  return {
+    chapter, district, index, round, start, street: chapter.districts[index],
+    progress: Math.max(0, Math.min(1, progress)),
+    nodes: chapter.districts.map((street, i) => ({ ...street, district: start + i, state: i < index ? 'cleared' : i === index ? 'current' : 'ahead' })),
+    nextDistrict, nextChapter, nextStreet: nextChapter.districts[(nextDistrict - 1) % 5],
+  };
+}
+
 /* 形态阶梯。scale 是**本档的体型区间**，由 growth.baseScale() 在区间内按等级
  * 线性插值 —— 这是体型的唯一出处，渲染层不再有第二套公式。
  *   幼兽   1 → 25   0.34 → 0.58     1 级 = 0.34（初始体型）
@@ -380,7 +440,7 @@ const defaults = () => ({
   assign: 0,               // 可用加点机会
   evoRolls: 0,             // 可用进化机会
   mutations: [],           // 已获得突变 id，按获得顺序
-  seed: 0,                 // 突变种子，生成一次后永久固定
+  seed: hashSeed(0, 1),    // 新档立即固定；避免首次重启按变化后的击杀/里程重新派生
   rerolls: 0,              // 已用重掷次数，用于定价
   morph: MUTATION_SHAPE(), // 外观快照（见 06 §5.4：可以推演，但必须落盘）
   talentResets: 0,         // 天赋重置次数，用于定价
@@ -693,7 +753,7 @@ const api = {
   Economy, STATS, SKILLS, defaults, sanitize,
   TALENT_RINGS, TALENT_NODES, TALENT_BY_ID, RING_GATE,
   MUTATIONS, MUTATION_BY_ID, RARITY, RARITY_BY_KEY, FACE_WEIGHTS, CATEGORY_SHARE,
-  Growth, EPOCHS, STAGES, stageIndexFor, epochIndexFor, globalScaleFor,
+  Growth, EPOCHS, STAGES, stageIndexFor, epochIndexFor, globalScaleFor, CHAPTERS, chapterFor, routeFor,
   hashSeed, mulberry32, mutateFor, rarityTableFor,
   Ke, Kb, xpPerEnemy, xpPerBuilding, xpPerDistrict,
 };
