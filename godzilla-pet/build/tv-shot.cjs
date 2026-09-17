@@ -114,7 +114,7 @@ async function runContract() {
   const liveAfter = await snapshot(main);
   assert.ok(liveAfter.energy > liveBefore.energy, '副屏打开时主屏经济仍在运行');
   assert.ok(liveAfter.meters >= liveBefore.meters, '里程不能倒退');
-  await execute(main, 'window.__growth.save();window.__tvSaveBridge.flush()');
+  await execute(main, 'window.__growth.save();window.__tvBridge.flush()');
   await waitFor(async () => {
     const a = await snapshot(panel), b = await snapshot(main);
     return a.level === b.level && a.assign === b.assign && a.talent === b.talent && a.mutations.length === b.mutations.length;

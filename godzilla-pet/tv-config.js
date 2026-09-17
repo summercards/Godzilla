@@ -1,18 +1,21 @@
-/* 迷你电视模式：档位参数 + 唯一的注入内容。
+/* 迷你电视模式：档位参数 + 窗口注入的 CSS。
  *
  * 抽成独立模块有两个原因：
  *   1. 拖动区域的 CSS 与档位尺寸是"对外契约"，主进程和开发期工具必须用同一份，
  *      复制粘贴迟早会漂移；
  *   2. 截图工具能 require 到真实数值，验证的是应用实际会用的东西。
  *
- * 注入内容分两类，必须分清楚：
+ * 注入内容分三类，前一类是给 frameless 窗口补把手，后两类只作用于面板窗口：
  *
- *   TV_DRAG_CSS      不改变任何呈现，只补 frameless 窗口缺的拖动把手。
- *   TV_HIDE_DOCK_CSS **唯一的例外** —— 它确实改了画面的外观（藏掉右上角那排
- *                    小按钮）。原因是那排按钮被 0.46 倍缩放压到只剩 5.6px，
- *                    既看不清也点不准，功能改由窗口外的像素按钮承担。
- *                    这是产品决定，不是修 bug；测试里单独断言，绝不能让它
- *                    混进"不改变呈现"那一类里去。
+ *   TV_DRAG_CSS        不改变任何呈现，只补 frameless 窗口缺的拖动把手。
+ *   PANEL_ONLY_CSS     面板只留观测面板，藏掉直播包装。
+ *   PANEL_READABLE_CSS 面板里的字与按钮放大一号。
+ *
+ * 历史：这里曾有一条 TV_HIDE_DOCK_CSS，用来藏掉画面右上角那排小按钮。
+ * 它注入的选择器是 .pixel-dock，而该类名在 tv/ 里早已不存在（版面换成了
+ * .tv-sidebar / .tv-menu），所以它是一条匹配不到任何元素的空操作。
+ * 2026-09-17 删除，删除前后全页 448 个元素的 computed display 逐字段一致
+ * （见 docs/技术线调整方向.md 的 Step 3 记录）。
  */
 'use strict';
 
@@ -42,6 +45,27 @@ const TV_SIZES = {
   large: { w: 600, h: 394, label: '大' },
 };
 
+/* 面板窗口的三档尺寸。**与电视档位完全解耦。**
+ *
+ * 为什么要解耦：电视是摆件，越小越不碍事；面板是操作台，越大越好用。
+ * 绑死时只有"小电视＋小面板""大电视＋大面板"两种组合，而玩家真正想要的
+ * 组合往往正好相反 —— 小电视挂在角落播着，面板摊开来点。
+ *
+ * 面板是 1:1 原生缩放（不做整页 zoom），所以这里写的就是真实屏幕像素。
+ * 取值依据：
+ *   - 宽度底线 560：资源条是 4 列，每格要塞下 20px 的数值 + 11px 的单位，
+ *     再窄就开始换行。解耦前 small 档的面板只有 448 宽，必然挤压 —— 那正是
+ *     "面板太窄"这条反馈的来源。
+ *   - 高度底线 640：标题栏 + 资源条 + 页签 + 行头约 200px 是固定开销，
+ *     内容区（自身纵向滚动）再留不到 400px，打开就只剩一条缝。
+ *
+ * 数值由 Step 4 实机截图定档；以后再调只改这里，别处不用动。 */
+const PANEL_SIZES = {
+  compact: { w: 560, h: 640, label: '紧凑' },
+  standard: { w: 640, h: 760, label: '标准' },
+  tall: { w: 720, h: 900, label: '加高' },
+};
+
 /* 原版是给浏览器写的，不认得 frameless 窗口——没有标题栏就没有拖动把手。
  * 这里只把"电视外壳"和顶部/底部条标成可拖动区域，不含任何视觉改动：
  * 背景色、字号、间距、布局一个字段都不动。 */
@@ -54,26 +78,12 @@ const TV_DRAG_CSS = `
   header, footer { -webkit-app-region: drag; }
 `;
 
-/* ⚠️ 这是整个工程里唯一会改变画面呈现的注入，理由见文件头。
- *
- * 藏掉的是画面右上角那排功能按钮（强化 / 技能树 / 档案 / 设置）。
- * 它们并没有消失，只是搬到了电视窗口外面那个像素按钮上，
- * 点开依旧是画面自带的那套观测面板（页面里的 #management 原样使用，
- * 由主进程用 executeJavaScript 模拟点击它自己的入口按钮打开）。
- *
- * 只动 display，不碰尺寸、颜色、字体 —— 万一哪天要还原，
- * 删掉这一条即可，画面本身没有任何残留改动。 */
-const TV_HIDE_DOCK_CSS = `
-  .pixel-dock { display: none !important; }
-`;
-
 /* 面板窗口专属注入。面板是"另一个 tv 实例"，但它不是用来直播的 ——
  * 用户要的是一块干净的菜单：直播包装（台标条、机位小窗、字幕组、
  * 滚动新闻条、页脚）全部藏掉，只留观测面板本身。
  *
- * 只在面板窗口注入，电视画面一个像素都不受影响。它和 TV_HIDE_DOCK_CSS
- * 是两回事：那条在电视窗口里也生效、是唯一的呈现例外；这条只存在于面板，
- * 面板本来就不是"原版画面"。 */
+ * 只在面板窗口注入，电视画面一个像素都不受影响：这里藏掉的每一个元素
+ * 在电视窗里都必须原样保留。 */
 const PANEL_ONLY_CSS = `
   /* 直播包装全部藏掉 */
   header, footer, #game, .scanlines, .camera-top, .inset,
@@ -151,4 +161,19 @@ function panelBounds(main, size, area, gap = 10) {
 }
 const zoomFor = (w) => w / VIEWPORT.w;
 
-module.exports = { VIEWPORT, TV_SIZES, TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, zoomFor, panelBounds };
+/* 面板档位 → panelBounds 吃的窗口尺寸。
+ *
+ * 档位用 w/h 命名（跟 TV_SIZES 对齐，两个列表要在同一个菜单里并排显示），
+ * 而 panelBounds 收的是 BrowserWindow 那套 width/height —— 在这里做唯一一次换算。
+ * 未知档位回落到 standard 而不是 `undefined`：档位名是从持久化状态读出来的，
+ * 老档、手改过的档都可能带一个没见过的值，那时给个能用的尺寸，别把窗口开成 0×0。 */
+const panelBox = (key) => {
+  const s = PANEL_SIZES[key] || PANEL_SIZES.standard;
+  return { width: s.w, height: s.h };
+};
+
+module.exports = {
+  VIEWPORT, TV_SIZES, PANEL_SIZES,
+  TV_DRAG_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS,
+  zoomFor, panelBounds, panelBox,
+};

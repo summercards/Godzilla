@@ -3,10 +3,17 @@
 const $=id=>document.getElementById(id),canvas=$('game'),out=canvas.getContext('2d'),monitor=$('monitor').getContext('2d'),channelCanvas=$('channel'),channelCtx=channelCanvas.getContext('2d');
 const buffer=document.createElement('canvas');buffer.width=640;buffer.height=360;const ctx=buffer.getContext('2d');ctx.imageSmoothingEnabled=out.imageSmoothingEnabled=monitor.imageSmoothingEnabled=false;
 const W=1280,H=720,G=590,LENGTH=4800,SAVE='gnn-kaiju-idle-v3',P=window.IdleProgression;
+/* 存档进出的唯一出口。桌宠外壳用 contextBridge 把它接到文件上
+ * （tv-preload.js / panel-preload.js 暴露的 __tvBridge.storage）；
+ * 桥不在时 —— 直接用浏览器打开本页、或 build/tv-shot.cjs 那种不挂 preload
+ * 的截图工具 —— 就落回真正的 localStorage，两种形态都能跑。
+ * 注意桌面外壳里**不能**再用 localStorage 存档：那份数据是页面私有的，
+ * 而且清一次缓存就没了，外壳的导出/备份也全都落空。 */
+const SAVEIO=(window.__tvBridge&&window.__tvBridge.storage)||localStorage;
 /* 资产位置与形态框架。ASSETS 提供路径与单位/建筑清单，Appearance 提供三轴解析。
  * 加载顺序见 index.html；两侧都是 UMD，Node 测试里由沙箱注入。 */
 const ASSETS=window.KaijuAssets,Appearance=window.KaijuAppearance;
-let storageOK=true,raw=null;try{raw=JSON.parse(localStorage.getItem(SAVE)||'null');}catch{storageOK=false;}
+let storageOK=true,raw=null;try{raw=JSON.parse(SAVEIO.getItem(SAVE)||'null');}catch{storageOK=false;}
 const pageSearch=window.location?.search||'';
 const panelMode=window.__panelMode===true||/([?&])panel=1(?:&|$)/.test(pageSearch);
 const economy=new P.Economy(raw);let data=economy.data;const skeleton=new KaijuRig.Skeleton();
@@ -87,7 +94,7 @@ function enemy(type,x,y){let spec=TYPES[type],hp=spec.hp*P.Ke(data.district)*(cu
 function cameraScale(){return Math.min(1.3-0.3*clamp((data.level-1)/24,0,1),currentStage().camera,1.16/bodyScale());}
 function cameraTarget(){return p.x-(420+140*clamp((bodyScale()-.333)/.787,0,1));}
 function worldSnapshot(){return {district:data.district,stage:currentStage().key,x:p.x,buildings:buildings.map(b=>({id:b.id,hp:b.hp,max:b.max,dead:b.dead})),enemies:enemies.filter(e=>e.fixed).map(e=>({id:e.id,hp:e.hp,state:e.state}))};}
-function save(){if(panelMode)return;try{localStorage.setItem(SAVE,economy.serialize(Date.now(),worldSnapshot()));if(browserPanel&&!browserPanel.closed)browserPanel.__growth?.sync(JSON.stringify(data));storageOK=true;$('saveState').innerHTML='<i></i> 进化进度已保存';}catch{storageOK=false;$('saveState').textContent='当前窗口运行 · 无法写入存档';}}
+function save(){if(panelMode)return;try{SAVEIO.setItem(SAVE,economy.serialize(Date.now(),worldSnapshot()));if(browserPanel&&!browserPanel.closed)browserPanel.__growth?.sync(JSON.stringify(data));storageOK=true;$('saveState').innerHTML='<i></i> 进化进度已保存';}catch{storageOK=false;$('saveState').textContent='当前窗口运行 · 无法写入存档';}}
 function generateWorld(restore){seed=1701+data.district*983;buildings=[];enemies=[];bullets=[];fires=[];wrecks=[];particles=[];rings=[];beam=null;
 const stage=currentStage();sceneZoom=cameraScale();
 let diff=P.Kb(data.district);for(let layer=0;layer<3;layer++){let i=0;for(let x=layer===1?650:layer===0?560:810;x<LENGTH-400;x+=layer===1?210:layer===0?185:310){let w=layer===2?125+rnd()*60:100+rnd()*57,h=stage.key==='village'?(layer===2?38+rnd()*24:70+rnd()*62):stage.key==='suburb'?(layer===2?65+rnd()*50:130+rnd()*95):layer===2?90+rnd()*80:layer===0?210+rnd()*170:255+rnd()*170;let b=makeBuilding(Math.round(x+rnd()*32),Math.round(w),Math.round(h),i+layer*13);b.layer=layer;b.id=layer+'-'+i;/* 正面主楼用商业塔楼资产，其余街区楼用街区大楼资产。 */
@@ -286,7 +293,7 @@ let branches={kinetic:['动能破坏','KINETIC'],atomic:['原子突变','ATOMIC'
 for(let key of ['assign','talent','evo','stats','skills','news','settings']){let t=$(key+'Tab');if(t)t.onclick=()=>openPanel(key);let o=$('open-'+key);if(o)o.onclick=()=>openPanel(key,$('open-'+key));}$('closePanel').onclick=closePanel;
 let cycBtn=$('chan-cycle');if(cycBtn)cycBtn.onclick=()=>cycleChannel();
 document.addEventListener('keydown',e=>{if($('management').hidden)return;if(e.key==='Escape'){e.preventDefault();closePanel();}if(e.key==='Tab'){let items=[...$('management').querySelectorAll('button:not(:disabled),select,input')].filter(n=>n.getClientRects().length);let first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}});
-$('auto').checked=data.auto;$('auto').onchange=()=>{data.auto=$('auto').checked;notice(data.auto?'自动进化已开启':'自动进化已关闭，可自行分配核能与突变点');save();};$('policy').value=data.policy;$('policy').onchange=()=>{data.policy=$('policy').value;save();notice('进化偏好已更新');};$('sound').textContent=muted?'开启现场声音':'现场声音：开';$('sound').onclick=()=>{audioInit();muted=!muted;data.muted=muted;$('sound').textContent=muted?'开启现场声音':'现场声音：开';save();};$('fullscreen').onclick=()=>{if(document.fullscreenElement)document.exitFullscreen();else $('playerFrame').requestFullscreen().catch(()=>notice('可使用浏览器全屏观看'));};$('dismissOffline').onclick=()=>{$('offline').hidden=true;};bindGrowthUI();}
+$('auto').checked=data.auto;$('auto').onchange=()=>{data.auto=$('auto').checked;notice(data.auto?'自动进化已开启':'自动进化已关闭，可自行分配核能与突变点');save();};$('policy').value=data.policy;$('policy').onchange=()=>{data.policy=$('policy').value;save();notice('进化偏好已更新');};$('sound').textContent=muted?'开启现场声音':'现场声音：开';$('sound').onclick=()=>{audioInit();muted=!muted;data.muted=muted;$('sound').textContent=muted?'开启现场声音':'现场声音：开';save();};$('dismissOffline').onclick=()=>{$('offline').hidden=true;};bindGrowthUI();}
 
 /* —— 成长面板：加点 / 天赋 / 进化 ——
  * 对应 doc/game-design/06、07。所有可点元素都有合法 id（^[A-Za-z][\w-]*$），
@@ -450,7 +457,7 @@ else{generateWorld(data.world);broadcast('巨兽观测恢复 · '+currentStage()
 if(!panelMode){
   document.addEventListener('pointerdown',()=>{if(!muted)audioInit();},{once:true});
   document.fonts?.ready.then(()=>{for(const b of buildings)b.texture=makeBuilding(b.x,b.w,b.h,b.index).texture;});
-  window.addEventListener('pagehide',()=>{save();window.__tvSaveBridge?.flush();});
+  window.addEventListener('pagehide',()=>{save();window.__tvBridge?.flush();});
   document.addEventListener('visibilitychange',()=>{save();last=performance.now();});
 }else{
   document.documentElement.classList.add('panel-view');
@@ -484,11 +491,16 @@ function frame(now){if(panelMode||debugFrozen)return;let rawDt=last?(now-last)/1
 let debugFrozen=false;
 if(!panelMode)requestAnimationFrame(frame);
 
-/* 暴露给桌宠侧（panel-preload.js）的成长钩子。
- * 面板是另一个 tv 实例、存档只读，它靠这几个函数和电视窗口协作：
+/* 交给桌宠侧的成长钩子。面板是另一个 tv 实例、存档只读，它靠这几个函数
+ * 和电视窗口协作：
  *   playRoll   面板收到电视窗口回推的掷骰结果，播动画
  *   sync       主进程每次落盘后推来的 payload，面板用它重建并重渲染
- * 只暴露函数、不暴露内部状态，别把 economy 或 data 交出去。 */
+ * 只暴露函数、不暴露内部状态，别把 economy 或 data 交出去。
+ *
+ * 它挂在 window 上是给**浏览器形态**用的（window.open 的副屏直接读
+ * window.opener.__growth）。桌面外壳里两个世界是隔离的，preload 看不见
+ * 页面全局，所以还要主动把同一份交进桥里（__tvBridge.register）——
+ * 桥不在时那个 ?. 是空操作，浏览器形态照旧。 */
 window.__growth={
   playRoll:(r)=>{try{playDiceRoll(r);}catch{}},
   sync:(payload)=>{if(!panelMode||typeof payload!=='string')return;let next=P.sanitize(JSON.parse(payload));Object.assign(data,next);$('auto').checked=data.auto;$('policy').value=data.policy;renderGrowthPanels();hud();},
@@ -498,6 +510,7 @@ window.__growth={
   open:(key)=>{try{openPanel(key);}catch{}},
   panelState:()=>String(!$('management').hidden),
 };
+try{window.__tvBridge?.register(window.__growth);}catch{}
 if(panelMode&&!window.__panelHost){
   try{if(window.opener?.__growth)window.__growth.sync(window.opener.__growth.snapshot());}catch{}
   openPanel(new URLSearchParams(pageSearch).get('tab')||'assign');

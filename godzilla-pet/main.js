@@ -8,17 +8,19 @@
  * 画面只能通过 IPC 读写。理由见 save-store.js 顶部的注释。
  * 游戏逻辑一律在画面自己那边。
  *
- * 唯一的例外是存档这件事本身：画面认的是 localStorage，而这里把那个键
- * 接到了文件上。动手的是 tv-preload.js —— 它凭什么能改到页面，见那个文件顶部。
- */
+ * 唯一的例外是存档这件事本身：画面认的是它的存档键，而这里把那个键接到了文件上。
+ * 动手的是 tv-preload.js —— 它通过 contextBridge 把接口交给画面（见那个文件顶部）。
+ * 渲染进程的隔离是开着的。 */
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, dialog, nativeImage, crashReporter } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { TV_DRAG_CSS, TV_HIDE_DOCK_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, zoomFor, panelBounds } = require('./tv-config.js');
+const { TV_DRAG_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, PANEL_SIZES, zoomFor, panelBounds, panelBox } = require('./tv-config.js');
 const { createStore } = require('./save-store.js');
+const { createLogger } = require('./log-store.js');
+const { createSaveGuard } = require('./save-guard.js');
 
 const ASSETS = path.join(__dirname, 'assets');
 
@@ -38,15 +40,93 @@ if (process.env.GNN_DEBUG_PORT) {
  * 决定的，晚一步设置就会先把缓存目录建成包名（godzilla-pet），改名后存档就找不到了。 */
 app.setName('巨兽都市桌宠');
 
+/* ------------------------------------------------------------------ *
+ * 可观测性：文件日志 + 崩溃转储
+ *
+ * 这一层存在的理由只有一个：这个应用要连续跑几个月，而它跑在别人的机器上。
+ * 玩家报"挂了一晚上等级不对"的时候，没有日志就只能靠猜；而挂机类的故障
+ * （数值跑飞、内存缓慢增长、渲染进程悄悄死掉）恰恰只在长时运行里出现，
+ * 在开发机上永远复现不了。
+ *
+ * 所以这里只做两件事：把主进程的关键事件写进一个能事后查看的文件，
+ * 以及真崩溃时留下一份可读的转储。日志的写法与约束见 log-store.js。
+ * ------------------------------------------------------------------ */
+const LOG_DIR = () => path.join(app.getPath('userData'), 'logs');
+const CRASH_DIR = () => path.join(app.getPath('userData'), 'crashes');
+
+let _log = null;
+
+/* 日志拿不到目录也不能让应用起不来：这一层是来帮忙的，不是来添乱的。
+ * 真到了那一步就静默成空操作，应用照常跑。 */
+function logger() {
+  if (!_log) {
+    try {
+      _log = createLogger({ dir: LOG_DIR(), name: 'main.log' });
+    } catch (error) {
+      _log = {
+        file: '',
+        info: () => {}, warn: () => {}, error: () => {},
+        meta: () => ({ broken: String((error && error.message) || error) }),
+      };
+    }
+  }
+  return _log;
+}
+
+/* 三层包装只是为了让"日志自身出错"不冒到调用点上 —— 它不该有能力打断应用。 */
+const logInfo = (message, extra) => { try { logger().info(message, extra); } catch { /* 日志不能反过来打断应用 */ } };
+const logWarn = (message, extra) => { try { logger().warn(message, extra); } catch { /* 同上 */ } };
+const logError = (message, extra) => { try { logger().error(message, extra); } catch { /* 同上 */ } };
+
+/* 崩溃转储落在 userData 下，和存档、日志并列。
+ *
+ * submitURL 先留空、uploadToServer 关掉：现在还没有收集端，把 dump 上传到
+ * 一个不存在的地方毫无意义。但**留着 dump 本身就是收益** —— 玩家机器上的
+ * 崩溃第一次有了可回传的证据。将来接上报只需填 submitURL 并打开开关。 */
+function startCrashReporter() {
+  try {
+    app.setPath('crashDumps', CRASH_DIR());
+    crashReporter.start({ submitURL: '', uploadToServer: false, compress: false, productName: '巨兽都市桌宠' });
+  } catch (error) {
+    logError('崩溃转储没能启动', { error: String((error && error.message) || error) });
+  }
+}
+
+/* 启动的第一条日志。版本与平台必须记下来 ——
+ * "在谁的机器上、跑的是哪一版"是所有后续排查的前提。 */
+function initObservability() {
+  try { app.setPath('logs', LOG_DIR()); } catch { /* setPath 失败不影响写日志，logger 自己会 mkdir */ }
+  logInfo('启动', {
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    platform: process.platform,
+    arch: process.arch,
+    userData: app.getPath('userData'),
+  });
+  startCrashReporter();
+}
+
+/* 退出兜底的那本账。写入函数与 save-store 的 write 同形，所以 save() 的返回值
+ * 可以原样透传给 IPC 调用方；写失败则落一条日志 —— 必须留痕，否则
+ * "玩家的进度为什么回退了"永远查不出来。语义见 save-guard.js。 */
+let _guard = null;
+const guard = () => (_guard ||= createSaveGuard({
+  write: (payload) => store().write({ version: 1, payload }),
+  onWriteFailed: (result, payload, reason) =>
+    logError('存档写入失败', { reason, error: result.error, bytes: payload.length, file: store().file }),
+}));
+
 const STATE_FILE = () => path.join(app.getPath('userData'), 'pet-window.json');
 
 /* 游戏画面的入口页。迷你电视直接播它——不复制、不改写，
  * 桌宠里怎么折腾都不会影响到里面的画面。 */
 const ORIGINAL_GAME = path.join(__dirname, 'tv', 'index.html');
 
-/* 画面的存档接管层。tv/ 里一个字节都不能改，存档就从外面劫持：
- * 这个 preload 把画面用的那个 localStorage 键接到 <userData>/save/tv.json。
- * 必须配 contextIsolation: false，原因见该文件顶部的说明。 */
+/* 画面的存档接管层。存档不落在页面私有的存储里，而是接到
+ * <userData>/save/tv.json：这个 preload 用 contextBridge 把那个存档键
+ * 交给画面，细节见该文件顶部。 */
 const TV_PRELOAD = path.join(__dirname, 'tv-preload.js');
 
 /* ------------------------------------------------------------------ *
@@ -59,11 +139,11 @@ const TV_PRELOAD = path.join(__dirname, 'tv-preload.js');
  * ------------------------------------------------------------------ */
 const PANEL_PRELOAD = path.join(__dirname, 'panel-preload.js');
 
-/* 面板高度放大系数。宽度跟电视成套；高度放宽是因为字放大之后，
- * 标题、资源条、页签这些固定部分就要占掉 200px 出头 —— 再按电视原高，
- * 窗口里只剩一条缝，打开面板什么都看不见、全靠滚动。
- * 加出来的高度全部给内容区（growthContent 是纵向滚动的）。 */
-const PANEL_H_SCALE = 1.45;
+/* 面板尺寸曾经是"电视尺寸 × 1.45"（PANEL_H_SCALE）。
+ * 那是解耦之前的做法：宽度跟着电视走，只把高度放宽一点，理由是"两个窗口要成套"。
+ * 代价是 small 档的面板只有 448×426 —— 20px 的资源数字塞进 4 列必然换行。
+ * 2026-09-17 改成独立档位，这个常量随之删除，别再按电视尺寸去推面板尺寸。
+ * 现在见 tv-config.js 的 PANEL_SIZES 与 panelBox()。 */
 
 /* ------------------------------------------------------------------ *
  * 存档
@@ -80,7 +160,7 @@ const SAVE_DIR = () => path.join(app.getPath('userData'), 'save');
 /* 版本号是这一层唯一的把关点：版本对不上的存档一概不认，
  * 让画面拿到空档从 1 级开始，也好过按新字段去解释旧数据。
  *
- * payload 保持字符串而不是解析后的对象 —— 它就是 localStorage 里原本的那个值
+ * payload 保持字符串而不是解析后的对象 —— 它就是画面存档键里原本的那个值
  * （tv/game.js 的 economy.serialize() 输出）。原样存取，才不会在往返中
  * 丢掉画面那边的字段。 */
 const isSaveV1 = (d) =>
@@ -94,6 +174,8 @@ const store = () => (_store ||= createStore({ dir: SAVE_DIR(), validate: isSaveV
  * 视口恒等于原版的 1280×720，靠缩放系数整体缩小，版面不受影响。 */
 const DEFAULTS = {
   size: 'medium',
+  /* 面板档位是独立状态：它不跟着电视走，也不从电视推导（见 tv-config.js）。 */
+  panelSize: 'standard',
   pos: null,
   alwaysOnTop: true,
   hidden: false,
@@ -104,6 +186,7 @@ let tray = null;
 let state = structuredClone(DEFAULTS);
 
 const curSize = () => TV_SIZES[state.size] || TV_SIZES.medium;
+const curPanelSize = () => PANEL_SIZES[state.panelSize] || PANEL_SIZES.standard;
 
 /* ------------------------------------------------------------------ *
  * 状态持久化
@@ -123,6 +206,10 @@ function loadState() {
    * 统一收敛到形状 3，读不出来的字段各自回落到默认值，
    * 这样从任何一版升上来都不会因为窗口位置读崩。 */
   const pickSize = (v) => (TV_SIZES[v] ? v : DEFAULTS.size);
+  /* 面板档位是 Step 4 新增的字段，老档里没有它。
+   * 刻意**不**按电视档位推一个初值 —— 解耦本身就是要让两者不再相关，
+   * 从电视推等于把耦合重新引进来一次。一律回落到 standard。 */
+  const pickPanelSize = (v) => (PANEL_SIZES[v] ? v : DEFAULTS.panelSize);
   const pickPos = (v) =>
     v && Number.isFinite(v.x) && Number.isFinite(v.y) ? { x: v.x, y: v.y } : null;
 
@@ -131,6 +218,7 @@ function loadState() {
 
   state = {
     size: pickSize(raw.size && typeof raw.size === 'object' ? raw.size.tv : raw.size),
+    panelSize: pickPanelSize(raw.panelSize),
     pos: pickPos(pos) || pickPos(legacyPos),
     alwaysOnTop: raw.alwaysOnTop !== false,
     hidden: raw.hidden === true,
@@ -204,30 +292,34 @@ function createWindow() {
     alwaysOnTop: state.alwaysOnTop,
     webPreferences: {
       preload: TV_PRELOAD,
-      /* 必须关掉隔离：存档接管要改的是页面那一份 Storage.prototype，
-       * 隔离世界里改的是另一个对象，碰不到画面。nodeIntegration 仍为 false，
-       * 页面拿不到 require。详见 tv-preload.js 顶部。 */
-      contextIsolation: false,
+      /* 渲染进程隔离开着。存档桥走 contextBridge（tv-preload.js 顶部有理由），
+       * 不再需要跟页面共用同一个 window。nodeIntegration 也是 false，
+       * 页面拿不到 require。 */
+      contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false, // 挂机游戏不能因为窗口失焦就降频
     },
   });
   win = w;
 
+  /* 窗口的物理尺寸与缩放系数是"版面看起来对不对"的全部输入，记下来 ——
+   * 玩家截图里画面偏了，第一件事就是比对这一行。 */
+  logInfo('电视窗口已创建', {
+    size: state.size, w: size.w, h: size.h, x: pos.x, y: pos.y,
+    zoom: Number(zoomFor(size.w).toFixed(4)),
+    alwaysOnTop: state.alwaysOnTop, hidden: state.hidden,
+  });
+
   w.loadFile(ORIGINAL_GAME);
 
   // 版面锚点：加载完成后把缩放系数定死，视口就恒等于原版的设计尺寸。
-  // 两条注入一起下：拖动区域（不动呈现），以及藏掉画面里那排小按钮
-  // （唯一的呈现改动，理由见 tv-config.js 顶部的说明）。
+  // 注入只补 frameless 窗口缺的拖动把手，不动任何呈现（见 tv-config.js）。
   w.webContents.on('did-finish-load', () => {
     w.webContents.setZoomFactor(zoomFor(size.w));
     w.webContents.insertCSS(TV_DRAG_CSS).catch(() => {});
-    w.webContents.insertCSS(TV_HIDE_DOCK_CSS).catch(() => {});
   });
   // 右键弹控制菜单：frameless 窗口没有标题栏，总得有个入口
-  w.webContents.on('context-menu', () => {
-    Menu.buildFromTemplate(controlTemplate()).popup({ window: w });
-  });
+  w.webContents.on('context-menu', () => popupControlMenu(w));
 
   // screen-saver 层级高于普通置顶，能压在菜单栏与全屏窗口之上
   if (state.alwaysOnTop) w.setAlwaysOnTop(true, 'screen-saver');
@@ -248,7 +340,13 @@ function createWindow() {
   w.on('moved', rememberPos);
   // 只清掉自己这一个引用：切画面时会先建新窗再让旧窗关掉，
   // 不加判断的话旧窗的 closed 会把新窗的引用一起抹掉。
-  w.on('closed', () => { if (win === w) win = null; });
+  w.on('closed', () => { if (win === w) win = null; logInfo('电视窗口已关闭'); });
+
+  /* 画面卡死是挂机场景里最典型的故障：进程还在、画面不动、存档也不再更新。
+   * 它可能自己缓过来，但必须留痕 —— 否则玩家说"挂了两小时什么都没涨"时，
+   * 我们连"它卡过"都不知道。 */
+  w.webContents.on('unresponsive', () => logError('画面无响应'));
+  w.webContents.on('responsive', () => logInfo('画面恢复响应'));
 
   // 外部链接交给系统浏览器，窗口本身永远不导航
   w.webContents.setWindowOpenHandler(({ url }) => {
@@ -276,10 +374,14 @@ const PANEL_KEYS = new Set(['assign', 'talent', 'evo', 'stats', 'skills', 'news'
 function placePanel() {
   if (!panelWin || panelWin.isDestroyed() || !win || win.isDestroyed()) return;
   const b = win.getBounds();
-  const p = panelWin.getBounds();
   const area = screen.getDisplayMatching(b).workArea;
 
-  panelWin.setBounds(panelBounds(b, p, area));
+  /* 目标尺寸取自**档位**，不是面板窗口自己当前的 bounds。
+   *
+   * 用当前 bounds 会让"改档位"这一步自相矛盾：窗口尺寸与算位置用的输入是
+   * 同一份旧值，结果是档位换了、位置却按旧尺寸算 —— 差出去正好一个面板宽度，
+   * 面板会看着像没挪窝，也可能压到屏幕外。档位是唯一真相。 */
+  panelWin.setBounds(panelBounds(b, panelBox(state.panelSize), area));
 }
 
 /* 打开观测面板。
@@ -300,16 +402,15 @@ function openPanel(key = 'assign') {
     placePanel(); panelWin.show(); panelWin.focus(); return;
   }
 
-  // 尺寸跟电视窗口的当前档位走 —— 两个窗口要成套，
-  // 一大一小摆在一起很突兀（用户原话："这个面板很大"）。
-  // 缩放却必须保持 1：面板要的是游戏自己的窄屏紧凑断点
-  // （max-height:480 那套，字号是真实的屏幕像素），而不是把 1120 宽的
-  // 直播版面再压扁一遍 —— 那正是"文字太小无法看到"的原因。
-  const s = curSize();
+  /* 尺寸用面板自己的档位，不再跟电视走。
+   * 缩放仍必须保持 1：面板要的是游戏自己的窄屏紧凑断点
+   * （max-height:480 那套，字号是真实的屏幕像素），而不是把 1120 宽的
+   * 直播版面再压扁一遍 —— 那正是"文字太小无法看到"的原因。 */
+  const ps = curPanelSize();
 
   panelWin = new BrowserWindow({
-    width: s.w,
-    height: Math.round(s.h * PANEL_H_SCALE),
+    width: ps.w,
+    height: ps.h,
     frame: false,
     backgroundColor: '#050a15',
     hasShadow: false,
@@ -323,8 +424,8 @@ function openPanel(key = 'assign') {
       // Chromium shares origin zoom within a session. Keep the read-only panel
       // in an ephemeral session so its 1:1 zoom cannot resize the TV viewport.
       partition: 'kaiju-panel',
-      // 同 tv-preload：存档接管要改页面那一份 Storage.prototype
-      contextIsolation: false,
+      // 同 tv-preload：存档桥走 contextBridge，渲染进程隔离保持开启
+      contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
     },
@@ -339,15 +440,19 @@ function openPanel(key = 'assign') {
      * clientWidth 是 1120 而不是窗口宽度，菜单里的字全部缩到 5px。
      * 不显式设 1，"面板不缩放"就只是个没生效的愿望。 */
     panelWin.webContents.setZoomFactor(1);
-    // 四条注入：拖动把手、藏画面里的小按钮、只留观测面板（见 tv-config.js）、
-    // 以及可读性放大 —— 字与按钮整体大一号（用户反馈"字也太小了"）。
+    // 三条注入：拖动把手、只留观测面板、可读性放大
+    // （后两条的理由见 tv-config.js；放大是用户反馈"字也太小了"）。
     panelWin.webContents.insertCSS(TV_DRAG_CSS).catch(() => {});
-    panelWin.webContents.insertCSS(TV_HIDE_DOCK_CSS).catch(() => {});
     panelWin.webContents.insertCSS(PANEL_ONLY_CSS).catch(() => {});
     panelWin.webContents.insertCSS(PANEL_READABLE_CSS).catch(() => {});
   });
   panelWin.once('ready-to-show', () => { if (panelWin) panelWin.show(); });
   panelWin.on('closed', () => { panelWin = null; });
+
+  /* 面板窗口也要有右键菜单（理由见 popupControlMenu）。
+   * 这里是主进程侧的事件，面板 preload 的只读白名单管不着它 —— 退出、存档导出、
+   * 面板大小这些都不属于"游戏操作"，本来就不该走那条转发通道。 */
+  panelWin.webContents.on('context-menu', () => popupControlMenu(panelWin));
 
   placePanel();
 }
@@ -399,6 +504,21 @@ function applySize(key) {
   placePanel();
 }
 
+/* 改面板档位。
+ *
+ * 与 applySize 的区别：电视是主窗口，改尺寸要连缩放系数一起改（版面靠它）；
+ * 面板是 1:1 的副窗口，尺寸纯粹是外框，改完重新定位一次即可。
+ *
+ * 面板没开着时也照改 —— 档位是持久状态，下次打开自然用新尺寸。
+ * 托盘菜单的勾选状态靠 refreshTray() 刷。 */
+function applyPanelSize(key) {
+  if (!PANEL_SIZES[key]) return;
+  state.panelSize = key;
+  saveState();
+  refreshTray();
+  placePanel();
+}
+
 function toggleVisible(force) {
   if (!win || win.isDestroyed()) {
     createWindow();
@@ -421,6 +541,21 @@ function resetPosition() {
   placePanel();
 }
 
+/* 右键弹出控制菜单。
+ *
+ * frameless 窗口没有标题栏也没有关闭按钮，右键菜单是"这个窗口上还能做什么"
+ * 的唯一出口 —— 也是"我怎么退出"这个问题的答案所在。
+ *
+ * **两个窗口都要装。** 电视是观赏位、面板是操作台（定调），玩家在面板里待的时间
+ * 长得多；只给电视装的话，"退出"恰恰在最常用的那个窗口里找不到。
+ *
+ * 走原生菜单还有一个附带好处：菜单由主进程直接构建，不经过 preload 的白名单转发，
+ * 所以面板窗口仍然是纯只读的 —— 没有为"退出"新开任何一条写存档的口子。 */
+function popupControlMenu(target) {
+  if (!target || target.isDestroyed()) return;
+  Menu.buildFromTemplate(controlTemplate()).popup({ window: target });
+}
+
 /* 托盘与右键菜单共用同一份模板 */
 function controlTemplate() {
   return [
@@ -429,6 +564,10 @@ function controlTemplate() {
     { type: 'separator' },
     { label: state.hidden ? '显示' : '收起', click: () => toggleVisible() },
     { label: '回到右下角', click: resetPosition },
+    /* 面板是游戏 UI 的正规位置（定调），也是被 skipTaskbar 排除在任务栏之外的那个
+     * 窗口的入口 —— 托盘菜单里必须能把它叫回来，否则玩家把电视收起来之后
+     * 就只剩"右键电视窗口"这一条路，而电视可能正被收起。 */
+    { label: '打开观测面板', click: () => openPanel() },
     { type: 'separator' },
     {
       label: '窗口大小',
@@ -440,6 +579,17 @@ function controlTemplate() {
       })),
     },
     {
+      /* 与「窗口大小」并列但**互不影响**：电视是摆件、面板是操作台，
+       * 玩家要的组合通常是"小电视 + 大面板"。见 tv-config.js 的 PANEL_SIZES。 */
+      label: '面板大小',
+      submenu: Object.entries(PANEL_SIZES).map(([key, s]) => ({
+        label: `${s.label}  (${s.w}×${s.h})`,
+        type: 'radio',
+        checked: state.panelSize === key,
+        click: () => applyPanelSize(key),
+      })),
+    },
+    {
       label: '持续置顶',
       type: 'checkbox',
       checked: state.alwaysOnTop,
@@ -447,8 +597,15 @@ function controlTemplate() {
     },
     { type: 'separator' },
     saveTemplate(),
+    { label: '打开日志文件夹', click: revealLogs },
     { type: 'separator' },
-    { label: '退出', role: 'quit' },
+    /* 退出必须走 app.quit()：它才会走完 before-quit → 存档兜底补写 → quit 这一串。
+     * 用 window.close() 或 process.exit() 都会绕过兜底，最坏情况丢掉最后一次进度。
+     *
+     * 这里刻意写成显式 click，而不是 `role: 'quit'`。两者行为等价（role 内部就是
+     * app.quit()），但显式写法能被端到端验收真的点一下 —— Step 2 那层"退出兜底"
+     * 的落盘正是靠这条路径验证的，而 role 项没法从脚本里触发。 */
+    { label: '退出', click: () => app.quit() },
   ];
 }
 
@@ -492,6 +649,15 @@ function revealSave() {
   shell.openPath(store().info().dir);
 }
 
+/* 日志对玩家只有一个用处：报问题的时候能找得到、发得出来。
+ * 藏在 userData 深处等于没有，所以托盘里给一个入口。 */
+function revealLogs() {
+  const meta = logger().meta();
+  const dir = meta.dir || app.getPath('userData');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* 建不出来就让 openPath 去报错 */ }
+  shell.openPath(dir);
+}
+
 async function exportSave() {
   const info = store().info();
   if (!info.hasSave && !info.hasBackup) {
@@ -508,6 +674,7 @@ async function exportSave() {
   });
   if (r.canceled || !r.filePath) return { ok: false, canceled: true, error: null };
   const out = store().exportTo(r.filePath);
+  if (out.ok) logInfo('导出了存档', { bytes: out.bytes, from: out.backup ? 'backup' : 'main' });
   if (out.ok) await pickWin('showMessageBox', {
     type: 'info', message: '已导出', detail: r.filePath,
   });
@@ -537,8 +704,14 @@ async function importSave() {
   if (ask.response !== 1) return { ok: false, canceled: true, error: null };
 
   const out = store().importFrom(r.filePaths[0]);
-  if (out.ok) reloadSave();
-  else await pickWin('showMessageBox', {
+  if (out.ok) {
+    /* 文件已经被整体替换，主进程缓存的那一份从此过期，必须当场作废。
+     * 不能只指望重载后的那次握手 —— 那个握手有可能永远不来（画面卡死或崩溃），
+     * 而缓存只要留到退出，就会把刚导入的档盖回旧数据，正是这场竞态的翻版。 */
+    guard().discard('import');
+    logWarn('导入了存档', { bytes: out.bytes });
+    reloadSave();
+  } else await pickWin('showMessageBox', {
     type: 'error', message: '这个文件不是有效的存档', detail: out.error || '未知原因',
   });
   return out;
@@ -555,7 +728,11 @@ async function resetSave() {
   });
   if (ask.response !== 1) return { ok: false, canceled: true, error: null };
   const out = store().clear();
-  if (out.ok) reloadSave();
+  if (out.ok) {
+    guard().discard('reset');   // 同上：文件已经被删掉，缓存必须作废
+    logWarn('重置了存档');
+    reloadSave();
+  }
   return out;
 }
 
@@ -606,9 +783,10 @@ function registerSaveIPC() {
    * 同步的，因为 game.js 一启动就同步读档 —— 这里必须当场把内容给它，
    * 换成异步会让它先拿着一份新档跑起来，再被迟到的文件覆盖成第二次初始化。
    *
-   * legacy 是画面原来那份 localStorage 存档（tv-preload.js 在装劫持之前读出来的）。
-   * 文件里还没有档、而浏览器存储里有的时候把它搬进文件 —— 装完劫持就再也
-   * 读不到那份老档了，只有这一次机会。搬完文件立刻存在，所以只会搬一次。 */
+   * legacy 是页面存储里那份老档（tv-preload.js 在装桥之前读出来的，
+   * 它与页面共用同一份 localStorage）。文件里还没有档、而浏览器存储里有
+   * 的时候把它搬进文件 —— 画面一旦改用桥，那份老档就再也没人读了，
+   * 只有这一次机会。搬完文件立刻存在，所以只会搬一次。 */
   ipcMain.on('tv:saveBoot', (e, legacy) => {
     reloading = false;                     // 握手应答即开闸
 
@@ -621,12 +799,22 @@ function registerSaveIPC() {
       if (w.ok) { payload = legacy; migrated = true; }
     }
 
+    /* 画面重载之后一律以文件为准，主进程缓存的那一份必须作废 ——
+     * 否则退出兜底会把导入前的旧档写回去（save-guard.js 顶部那条规则）。 */
+    guard().discard('boot');
+
+    /* 认档结果只留这一行，但它值钱：source=backup 意味着主档读不出来、
+     * 玩家是从备份救回来的 —— 那是"存档曾经损坏"的唯一线索。
+     * 注：日常的 5 秒写盘刻意不记，一天一万七千行只会把日志淹掉。 */
+    if (r.source === 'backup') logWarn('主档读不出来，已从备份恢复', { bytes: payload ? payload.length : 0 });
+    else logInfo('画面认档完成', { source: r.source, bytes: payload ? payload.length : 0, migrated });
+
     e.returnValue = { payload, migrated, source: r.source };
   });
 
   ipcMain.on('tv:saveWrite', (_e, payload) => {
     if (reloading || typeof payload !== 'string') return;
-    store().write({ version: 1, payload });
+    guard().save(payload);   // 失败会自己落日志，并把这一份留作退出兜底
     syncPanel(payload);
   });
 
@@ -635,7 +823,7 @@ function registerSaveIPC() {
    * 日常的写入走异步那条，不阻塞渲染帧。 */
   ipcMain.on('tv:saveWriteSync', (e, payload) => {
     if (reloading || typeof payload !== 'string') { e.returnValue = SAVE_BUSY; return; }
-    e.returnValue = store().write({ version: 1, payload });
+    e.returnValue = guard().save(payload);
     syncPanel(payload);
   });
 
@@ -699,6 +887,46 @@ function syncPanel(payload) {
 }
 
 /* ------------------------------------------------------------------ *
+ * 进程级安全网
+ *
+ * 装在单实例锁之前：这几个回调只写日志、只请求退出，不依赖任何初始化。
+ * ------------------------------------------------------------------ */
+
+/* 主进程的兜底。装了处理器，进程就不会因为一个未捕获的异常直接消失 ——
+ * 对一个要连续跑几个月的桌宠来说，带着一条日志活下去比干净地死去有用。
+ * 代价是可能带着坏状态继续跑，所以每条都记 error，事后看得出来发生过什么。 */
+process.on('uncaughtException', (error) => {
+  logError('未捕获的异常', {
+    message: String(error && error.message),
+    stack: String(error && error.stack),
+  });
+});
+process.on('unhandledRejection', (reason) => {
+  logError('未处理的 Promise 拒绝', {
+    reason: String(reason && reason.stack ? reason.stack : reason),
+  });
+});
+
+/* 系统信号不需要自己处理 —— 这是实测结论，不是假设。
+ *
+ * 曾经在这里装过 process.on('SIGTERM') 想保证"被 kill 时也能正常退出"，
+ * 探针跑完发现它一次都没被调用过：Electron（Chromium）在 C++ 层就接管了
+ * SIGTERM，并且自己走完整的退出流程。实测的事件序列是
+ *
+ *   kill -TERM <pid>  →  before-quit  →  will-quit  →  quit
+ *
+ * 三条都触发了，而 Node 那一侧的处理器始终沉默。也就是说兜底落盘与画面的
+ * pagehide 在 SIGTERM 路径下本来就都会跑到，再装一层只是重复，还会让注释
+ * 说假话（"这一层保证了不丢档"——真正保证它的是平台）。
+ *
+ * 顺带一个实测数字：SIGTERM 到存档落盘之间约 200ms。所以"按 kill 后重启，
+ * 存档时间戳应当是 last moment"这条是可复现的（记录在 docs/技术线调整方向.md
+ * 的 Step 2 完成记录里）。
+ *
+ * 未测部分：Windows 上不存在真正的 SIGTERM，外部终止走的是别的路径，
+ * 那一半仍属 Step 1 的欠账。 */
+
+/* ------------------------------------------------------------------ *
  * 启动
  * ------------------------------------------------------------------ */
 // 第二次启动时只是把已有窗口叫回视线，不新开一个
@@ -707,10 +935,27 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => toggleVisible(false));
 
+  /* 渲染进程真的死掉（不是卡住）比 unresponsive 严重：画面没了，
+   * 存档也不再更新，玩家看到的是一块不动的电视。 */
+  app.on('render-process-gone', (_e, _webContents, details) => {
+    logError('渲染进程退出', { reason: details && details.reason, exitCode: details && details.exitCode });
+  });
+  app.on('child-process-gone', (_e, details) => {
+    logError('子进程退出', {
+      type: details && details.type, reason: details && details.reason, exitCode: details && details.exitCode,
+    });
+  });
+
   app.whenReady().then(() => {
+    initObservability();       // 先起日志：这之后每一步的失败都要能被记下来
     if (process.platform === 'darwin') app.dock?.hide(); // 桌宠不占 Dock
     Menu.setApplicationMenu(null);
     loadState();
+    /* 记下读回来的窗口状态。它比产品活得久，历史上换过三种形状 ——
+     * 万一某次升级后位置或档位不对，这一行能立刻区分"读错了"还是"没生效"。 */
+    logInfo('窗口状态已载入', {
+      size: state.size, pos: state.pos, alwaysOnTop: state.alwaysOnTop, hidden: state.hidden,
+    });
     registerSaveIPC();
     registerDockIPC();
     createWindow();
@@ -721,14 +966,21 @@ if (!app.requestSingleInstanceLock()) {
   // 托盘应用：关掉窗口不等于退出
   app.on('window-all-closed', () => {});
 
-  /* 退出前只需要记住窗口位置。
+  /* 退出前记住窗口位置，外加补一次兜底落盘。
    *
-   * 进度不用在这里操心：画面自己的 pagehide 里有一次同步落盘
-   * （tv-preload.js 的 flushSync），窗口关闭时必定跑到，
-   * 而且 sendSync 会一直阻塞到主进程把档写完为止 ——
-   * 主进程继续往下退出时，数据已经在磁盘上了。 */
+   * 进度主要靠画面自己的 pagehide（tv-preload.js 的 flushSync）：窗口关闭时
+   * 必定跑到，而且 sendSync 会一直阻塞到主进程把档写完为止。
+   * 但那条路在下面几种情况下跑不到 ——
+   *   上一次写盘就失败了、渲染进程已经不在、页面没来得及卸载 ——
+   * 所以这里再补一次：主进程手上那份"最后一次收到的 payload"就是最后一道保险。
+   * 正常情况下它是空转（不欠账就不碰磁盘）。 */
   app.on('before-quit', () => {
     rememberBounds();
     saveState();
+
+    const f = guard().flush('before-quit');
+    if (f.attempted && f.ok) logWarn('退出兜底：补写了未落盘的存档', { bytes: f.bytes });
   });
+
+  app.on('quit', () => logInfo('已退出'));
 }
