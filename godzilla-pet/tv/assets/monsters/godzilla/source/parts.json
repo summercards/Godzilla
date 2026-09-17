@@ -1,0 +1,230 @@
+{
+  "jaw": {
+    "width": 134,
+    "height": 114,
+    "scale": 0.4,
+    "atlasBounds": [
+      1270,
+      176,
+      134,
+      114
+    ],
+    "sourcePivot": [
+      1292,
+      199
+    ],
+    "approvedPivot": [
+      8.8,
+      9.200000000000001
+    ]
+  },
+  "head": {
+    "width": 391,
+    "height": 289,
+    "scale": 0.4,
+    "atlasBounds": [
+      1095,
+      23,
+      391,
+      289
+    ],
+    "sourcePivot": [
+      1180,
+      210
+    ],
+    "approvedPivot": [
+      34,
+      74.8
+    ]
+  },
+  "forearm": {
+    "width": 312,
+    "height": 182,
+    "scale": 0.4,
+    "atlasBounds": [
+      1216,
+      390,
+      312,
+      182
+    ],
+    "sourcePivot": [
+      1257,
+      472
+    ],
+    "approvedPivot": [
+      16.400000000000002,
+      32.800000000000004
+    ]
+  },
+  "upper_arm": {
+    "width": 213,
+    "height": 210,
+    "scale": 0.4,
+    "atlasBounds": [
+      1100,
+      316,
+      213,
+      210
+    ],
+    "sourcePivot": [
+      1143,
+      370
+    ],
+    "approvedPivot": [
+      17.2,
+      21.6
+    ]
+  },
+  "shin": {
+    "width": 392,
+    "height": 188,
+    "scale": 0.4,
+    "atlasBounds": [
+      802,
+      836,
+      392,
+      188
+    ],
+    "sourcePivot": [
+      1061,
+      881
+    ],
+    "approvedPivot": [
+      103.60000000000001,
+      18
+    ]
+  },
+  "thigh": {
+    "width": 389,
+    "height": 364,
+    "scale": 0.4,
+    "atlasBounds": [
+      807,
+      546,
+      389,
+      364
+    ],
+    "sourcePivot": [
+      988,
+      673
+    ],
+    "approvedPivot": [
+      72.4,
+      50.800000000000004
+    ]
+  },
+  "far_shin": {
+    "width": 261,
+    "height": 217,
+    "scale": 0.4,
+    "atlasBounds": [
+      1182,
+      792,
+      261,
+      217
+    ],
+    "sourcePivot": [
+      1309,
+      853
+    ],
+    "approvedPivot": [
+      50.800000000000004,
+      24.400000000000002
+    ]
+  },
+  "far_thigh": {
+    "width": 298,
+    "height": 285,
+    "scale": 0.4,
+    "atlasBounds": [
+      1161,
+      603,
+      298,
+      285
+    ],
+    "sourcePivot": [
+      1244,
+      687
+    ],
+    "approvedPivot": [
+      33.2,
+      33.6
+    ]
+  },
+  "tail_tip": {
+    "width": 346,
+    "height": 350,
+    "scale": 0.4,
+    "atlasBounds": [
+      0,
+      514,
+      346,
+      350
+    ],
+    "sourcePivot": [
+      322,
+      656
+    ],
+    "approvedPivot": [
+      128.8,
+      56.800000000000004
+    ]
+  },
+  "tail_mid": {
+    "width": 307,
+    "height": 337,
+    "scale": 0.4,
+    "atlasBounds": [
+      345,
+      533,
+      307,
+      337
+    ],
+    "sourcePivot": [
+      605,
+      730
+    ],
+    "approvedPivot": [
+      104,
+      78.80000000000001
+    ]
+  },
+  "tail_base": {
+    "width": 409,
+    "height": 385,
+    "scale": 0.4,
+    "atlasBounds": [
+      499,
+      568,
+      409,
+      385
+    ],
+    "sourcePivot": [
+      817,
+      802
+    ],
+    "approvedPivot": [
+      127.2,
+      93.60000000000001
+    ]
+  },
+  "torso": {
+    "width": 1445,
+    "height": 979,
+    "scale": 0.4,
+    "atlasBounds": [
+      81,
+      21,
+      1445,
+      979
+    ],
+    "sourcePivot": [
+      988,
+      673
+    ],
+    "approvedPivot": [
+      362.8,
+      260.8
+    ]
+  }
+}

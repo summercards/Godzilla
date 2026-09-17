@@ -74,11 +74,19 @@
 - `index.html` / `style.css`：新闻直播和成长界面。
 - `game.js`：自动决策、战斗、场景、物理表演和存档接入。
 - `progression.js`：独立的资源、数值成长、技能树、离线结算模型。
-- `rig.js`：骨骼层级、关节位置、关键帧和世界坐标计算。
-- `assets/rig-source/`：从原始角色直接拆出的 12 个部件 PNG 与部件元数据。
+- `rig.js`：骨骼层级、关节位置、关键帧和世界坐标计算。部件表不在这里手写，
+  由 `assets/monsters/<怪兽>/rig.data.js`（结构）+ `assets/asset-index.js`（路径）
+  + `appearance.js`（形态）三层组装。
+- `appearance.js`：成长形态框架。形态与「样式 / 颜色 / 大小」三个轴的解算。
+- `assets/asset-index.js`：全部游戏资产路径与清单的唯一真相。
+- `assets/monsters/godzilla/`：兽本体 —— `parts/<槽位>/<样式>.png` 是 12 个骨骼槽的贴图，
+  `source/` 是母图与母图空间裁切元数据。
+- `assets/enemies/`、`assets/buildings/`：敌对单位与建筑资产，按阵营/幕分目录。
 - `DESIGN.md`：数值、AI 和破坏状态机说明。
 - `ART-DIRECTION.md`：原图拆件、造型还原与资产记录。
 - `CHANGELOG.md`：本次改版与验证记录。
+
+资产框架与目录约束见仓库根目录的 `docs/怪物形态框架.md`、`docs/资产规范.md`。
 
 ## 检查
 

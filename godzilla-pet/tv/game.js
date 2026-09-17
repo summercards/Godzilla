@@ -3,6 +3,9 @@
 const $=id=>document.getElementById(id),canvas=$('game'),out=canvas.getContext('2d'),monitor=$('monitor').getContext('2d'),channelCanvas=$('channel'),channelCtx=channelCanvas.getContext('2d');
 const buffer=document.createElement('canvas');buffer.width=640;buffer.height=360;const ctx=buffer.getContext('2d');ctx.imageSmoothingEnabled=out.imageSmoothingEnabled=monitor.imageSmoothingEnabled=false;
 const W=1280,H=720,G=590,LENGTH=4800,SAVE='gnn-kaiju-idle-v3',P=window.IdleProgression;
+/* 资产位置与形态框架。ASSETS 提供路径与单位/建筑清单，Appearance 提供三轴解析。
+ * 加载顺序见 index.html；两侧都是 UMD，Node 测试里由沙箱注入。 */
+const ASSETS=window.KaijuAssets,Appearance=window.KaijuAppearance;
 let storageOK=true,raw=null;try{raw=JSON.parse(localStorage.getItem(SAVE)||'null');}catch{storageOK=false;}
 const pageSearch=window.location?.search||'';
 const panelMode=window.__panelMode===true||/([?&])panel=1(?:&|$)/.test(pageSearch);
@@ -50,8 +53,11 @@ function line(points,c,width=2){ctx.strokeStyle=c;ctx.lineWidth=width;ctx.beginP
 function text(t,x,y,size=12,color='#dbe8ff',align='left'){ctx.fillStyle=color;ctx.font=`${size}px Pixel, monospace`;ctx.textAlign=align;ctx.fillText(t,Math.round(x),Math.round(y));}
 const skyline=[];for(let layer=0;layer<3;layer++){let a=[],x=-100;while(x<7800){let w=40+rnd()*75,h=70+rnd()*230;a.push({x,w,h,seed:Math.floor(rnd()*99999)});x+=w+6+rnd()*16;}skyline.push(a);}
 const DISTRICTS=['新宿 · 歌舞伎町','新宿 · 高架封锁线','湾岸 · 工业地带','港区 · 防卫司令部','东京湾 · 最终防卫圈'];
-const TYPES={tank:{hp:90,resistance:.07,reward:20,label:'主战坦克'},heli:{hp:80,resistance:.06,reward:24,label:'武装直升机'},rocket:{hp:160,resistance:.13,reward:35,label:'火箭炮车'},gunship:{hp:230,resistance:.19,reward:48,label:'重装武装直升机'},aegis:{hp:360,resistance:.31,reward:65,label:'电磁装甲车'},mech:{hp:600,resistance:.45,reward:100,label:'重型攻城机甲'},
-  jet:{hp:70,resistance:.05,reward:18,label:'喷气战机'},drone:{hp:38,resistance:.03,reward:11,label:'侦察无人机'},walker:{hp:340,resistance:.28,reward:55,label:'四足攻城兽'},bunker:{hp:430,resistance:.34,reward:62,label:'要塞炮台'}};
+/* 这里只留玩法数值。单位的显示名、资产目录、绘制函数一律从
+ * assets/asset-index.js 取，避免同一批单位身份散落在代码与资产清单两处。 */
+const TYPES={tank:{hp:90,resistance:.07,reward:20},heli:{hp:80,resistance:.06,reward:24},rocket:{hp:160,resistance:.13,reward:35},gunship:{hp:230,resistance:.19,reward:48},aegis:{hp:360,resistance:.31,reward:65},mech:{hp:600,resistance:.45,reward:100},
+  jet:{hp:70,resistance:.05,reward:18},drone:{hp:38,resistance:.03,reward:11},walker:{hp:340,resistance:.28,reward:55},bunker:{hp:430,resistance:.34,reward:62}};
+for(const type in TYPES){const unit=ASSETS.enemyUnit(type);if(!unit)throw new Error('单位 '+type+' 未在 assets/asset-index.js 登记');TYPES[type].label=unit.label;TYPES[type].assetId=ASSETS.dir.enemy(unit.faction,type);TYPES[type].renderer=unit.renderer;}
 const alive=e=>e.state==='alive';const activeBuildings=()=>buildings.filter(b=>!b.dead);
 function fmt(n){if(n>=1e9)return(n/1e9).toFixed(2)+'B';if(n>=1e6)return(n/1e6).toFixed(2)+'M';if(n>=10000)return(n/1000).toFixed(1)+'K';return Math.floor(n).toLocaleString('en-US');}
 /* 等级体型成长：1 级初始物理 0.333，随等级渐近成长逼近满尺度（指数饱和，非线性）；
@@ -61,8 +67,9 @@ function bodyScale(){const lvl=data.level;const start=0.333+0.667*(1-Math.exp(-(
 function scaleRig(state,bs,px,py){const mp=b=>({x:px+(b.x-px)*bs,y:py+(b.y-py)*bs,a:b.a});const bones={};for(const k in state.bones)bones[k]=mp(state.bones[k]);const pt=q=>({x:px+(q.x-px)*bs,y:py+(q.y-py)*bs});return{bones,seams:(state.seams||[]).map(s=>({x:px+(s.x-px)*bs,y:py+(s.y-py)*bs,a:s.a,rx:s.rx*bs,ry:s.ry*bs})),muzzle:pt(state.muzzle),claw:pt(state.claw),foot:pt(state.foot),tail:pt(state.tail),neutral:state.neutral};}
 /* 原子吐息主色：主元素决定，否则按突变体征（赤化/白化），默认青蓝。 */
 function beamColor(){let main=economy.mainElement();if(main)return P.TALENT_BY_ID[main].color;if(data.morph.hue==='crimson')return '#ff5a3c';if(data.morph.hue==='albino')return '#dff4ff';return '#70f8ff';}
-/* 背刺/脊刺主色：主元素色优先，否则按体征期配色。 */
-function spineColor(){let main=economy.mainElement();if(main)return P.TALENT_BY_ID[main].color;return economy.epoch().color||'#3a6b4a';}
+/* 主元素色：有主元素天赋时返回它的颜色，否则 null（交给形态期的配色兜底）。
+ * 背鳍与辉光共用，形态框架 appearance.decor() 也吃这个值。 */
+function elementColor(){let main=economy.mainElement();return main?P.TALENT_BY_ID[main].color:null;}
 /* 加点 / 天赋 / 突变后的可见玩法反馈：闪屏 + 常驻 HUD 脉冲 + 浮字。 */
 function growthFeedback(text,color){flash=Math.max(flash,.14);hitFlash=Math.max(hitFlash,.1);let h=$('hud');if(h){h.classList.remove('pulse');void h.offsetWidth;h.classList.add('pulse');}floaters.push({x:p.x,y:p.ground-300,text,life:1.1,color:color||'#ffd76b'});}
 function notice(s){$('notice').textContent=s;$('notice').style.opacity=1;noticeTimer=4;}
@@ -83,7 +90,8 @@ function worldSnapshot(){return {district:data.district,stage:currentStage().key
 function save(){if(panelMode)return;try{localStorage.setItem(SAVE,economy.serialize(Date.now(),worldSnapshot()));if(browserPanel&&!browserPanel.closed)browserPanel.__growth?.sync(JSON.stringify(data));storageOK=true;$('saveState').innerHTML='<i></i> 进化进度已保存';}catch{storageOK=false;$('saveState').textContent='当前窗口运行 · 无法写入存档';}}
 function generateWorld(restore){seed=1701+data.district*983;buildings=[];enemies=[];bullets=[];fires=[];wrecks=[];particles=[];rings=[];beam=null;
 const stage=currentStage();sceneZoom=cameraScale();
-let diff=P.Kb(data.district);for(let layer=0;layer<3;layer++){let i=0;for(let x=layer===1?650:layer===0?560:810;x<LENGTH-400;x+=layer===1?210:layer===0?185:310){let w=layer===2?125+rnd()*60:100+rnd()*57,h=stage.key==='village'?(layer===2?38+rnd()*24:70+rnd()*62):stage.key==='suburb'?(layer===2?65+rnd()*50:130+rnd()*95):layer===2?90+rnd()*80:layer===0?210+rnd()*170:255+rnd()*170;let b=makeBuilding(Math.round(x+rnd()*32),Math.round(w),Math.round(h),i+layer*13);b.layer=layer;b.id=layer+'-'+i;b.ground=G+(layer===2?32:layer===0?-14:0);b.max=b.hp=Math.round((layer===1?780:layer===0?520:360)*diff*(1+Math.max(0,b.h-(layer===2?90:210))/500));b.floorCount=Math.ceil(h/35);b.tilt=(rnd()-.5)*.22;buildings.push(b);i++;}}
+let diff=P.Kb(data.district);for(let layer=0;layer<3;layer++){let i=0;for(let x=layer===1?650:layer===0?560:810;x<LENGTH-400;x+=layer===1?210:layer===0?185:310){let w=layer===2?125+rnd()*60:100+rnd()*57,h=stage.key==='village'?(layer===2?38+rnd()*24:70+rnd()*62):stage.key==='suburb'?(layer===2?65+rnd()*50:130+rnd()*95):layer===2?90+rnd()*80:layer===0?210+rnd()*170:255+rnd()*170;let b=makeBuilding(Math.round(x+rnd()*32),Math.round(w),Math.round(h),i+layer*13);b.layer=layer;b.id=layer+'-'+i;/* 正面主楼用商业塔楼资产，其余街区楼用街区大楼资产。 */
+if(stage.key==='city'&&layer===1){b.kind='tower';b.assetId=buildingAssetId('city','tower');}b.ground=G+(layer===2?32:layer===0?-14:0);b.max=b.hp=Math.round((layer===1?780:layer===0?520:360)*diff*(1+Math.max(0,b.h-(layer===2?90:210))/500));b.floorCount=Math.ceil(h/35);b.tilt=(rnd()-.5)*.22;buildings.push(b);i++;}}
 let tier=stage.key==='village'?1:stage.key==='suburb'?Math.min(3,data.district):Math.min(5,data.district);for(let i=0;i<16;i++){let type='tank';if(i%4===1)type='heli';else if(i%4===3&&tier>=2)type='rocket';if(tier>=3&&i%5===2)type='gunship';if(tier>=4&&i%5===3)type='aegis';if(tier>=5&&i%7===0)type='mech';if(tier>=2&&i%6===4)type='drone';if(tier>=4&&i%6===1)type='jet';if(tier>=3&&i%8===5)type='walker';if(tier>=4&&i%9===7)type='bunker';if(stage.key==='village'&&i%4===2)type='drone';let flying=/heli|gunship|jet|drone/.test(type);let e=enemy(type,620+i*253,flying?(stage.key==='village'?G-190:165)+i%3*28:undefined);e.fixed=true;e.id='e'+i;enemies.push(e);}
 if(stage.key!=='village'&&data.district>=2){let type=stage.key==='city'?'mech':'aegis',e=enemy(type,LENGTH-390);e.max=e.hp*=2;e.fixed=true;e.id='gate';e.gate=true;enemies.push(e);}
 p.x=420;p.action={name:'walk',t:0};p.cooldowns={beam:18,stomp:7,tail:10,roar:19};p.step=0;p.angle=.12;
@@ -121,10 +129,16 @@ function tone(f,d=.1,type='square',v=.05,end=f){if(!audio||muted)return;const o=
 function noise(d=.3,v=.3,low=800){if(!audio||muted)return;let b=audio.createBuffer(1,audio.sampleRate*d,audio.sampleRate),a=b.getChannelData(0);for(let i=0;i<a.length;i++)a[i]=(Math.random()*2-1)*(1-i/a.length);let s=audio.createBufferSource(),f=audio.createBiquadFilter(),g=audio.createGain();s.buffer=b;f.type='lowpass';f.frequency.value=low;g.gain.value=v;s.connect(f);f.connect(g);g.connect(master);s.start();}
 function sound(kind){if(kind==='hit'){noise(.17,.27,1700);tone(80,.16,'sawtooth',.12,25);}if(kind==='boom'){noise(.8,.7,700);tone(55,.6,'sine',.3,15);}if(kind==='roar'){tone(78,1.1,'sawtooth',.27,25);tone(83,1.2,'sawtooth',.13,30);noise(.9,.28,440);}if(kind==='beam'){tone(100,.25,'sawtooth',.09,160);noise(.2,.11,1800);}if(kind==='shot')tone(170,.08,'square',.03,50);if(kind==='pickup'){tone(550,.14,'sine',.12,950);} }
 function music(dt){if(!audio||muted||mode!=='playing')return;musicClock-=dt;if(musicClock<=0){musicClock=.27;const notes=[55,55,65.4,55,49,49,73.4,65.4];tone(notes[Math.floor(musicStep/2)%8],.23,'triangle',.075);if(musicStep%4===0)tone(45,.2,'sine',.18,20);if(musicStep%2===1)noise(.04,.04,4000);musicStep++;}}
+/* 建筑资产落点：幕 + 建筑种类 → 目录（见 assets/asset-index.js）。
+ * 现在仍是程序化绘制，kind/assetId 是建筑资产的"身份证"与贴图接入点；
+ * 测试会校验每栋生成的建筑都指向一个已登记的目录，写错名字不会静默放过。 */
+function buildingAssetId(stage,kind){return ASSETS.buildingKind(stage,kind)?ASSETS.dir.building(stage,kind):ASSETS.dir.building(stage,'house');}
 function makeVillageBuilding(x,w,h,index){
   const s=document.createElement('canvas');s.width=w;s.height=h+40;const c=s.getContext('2d');c.imageSmoothingEnabled=false;
   const R=(x,y,w,h,col)=>{c.fillStyle=col;c.fillRect(Math.round(x/2)*2,Math.round(y/2)*2,Math.ceil(w/2)*2,Math.ceil(h/2)*2);};
   const shop=index%4===1,flat=index%3===0,wall=['#657888','#748b94','#9b9180','#647d83'][index%4];
+  /* 平顶楼在城郊算低层公寓，在村庄只是平顶民房 —— 同一绘制函数对应两种资产种类。 */
+  const stageKey=currentStage().key,kind=flat?(stageKey==='suburb'?'midrise':'house'):shop?'shop':'house';
   R(4,31,w-8,h+5,'#101d31');R(8,35,w-16,h-1,wall);R(w-24,35,16,h-1,'#34475b');R(10,37,4,h-3,'#c0b99c');
   if(flat){R(0,24,w,12,'#263b52');R(4,24,w-8,4,'#91a5ae');R(16,10,28,14,'#8c9c9b');R(20,14,18,4,'#4a6778');}
   else{for(let row=0;row<7;row++){const inset=(6-row)*5;R(inset,6+row*4,w-inset*2,6,row%2?'#35536c':'#58778a');}R(0,32,w,5,'#a4b4ad');}
@@ -134,9 +148,9 @@ function makeVillageBuilding(x,w,h,index){
   if(shop){R(7,h-13,w-14,20,'#244e66');c.font='12px Pixel,monospace';c.fillStyle='#fff0bb';c.textAlign='center';c.fillText(['便利商店','街角食堂','鲜食小铺'][index%3],w/2,h+1);for(let xx=4;xx<w-4;xx+=14)R(xx,h+7,14,10,xx%28<14?'#d5c7a0':'#407b85');R(48,h+18,w-77,17,'#e7cd8d');R(59,h+19,3,16,'#486775');}
   else{R(w-62,h+15,53,20,'#637987');R(w-65,h+12,59,5,'#a3aaa0');for(let xx=w-59;xx<w-12;xx+=13)R(xx,h+20,9,2,'#425c6d');}
   R(4,h+35,w-8,5,'#1c3044');
-  return{x,w,h,index,hp:260,max:260,dead:false,collapse:0,hit:0,seed:Math.floor(rnd()*99999),texture:s,asset:shop?'shop':'house'};
+  return{x,w,h,index,hp:260,max:260,dead:false,collapse:0,hit:0,seed:Math.floor(rnd()*99999),texture:s,kind,assetId:buildingAssetId(stageKey,kind)};
 }
-function makeBuilding(x,w,h,index){if(currentStage().key==='village'||currentStage().key==='suburb'&&index%3!==0)return makeVillageBuilding(x,w,h,index);let b={x,w,h,hp:260+index*10,max:260+index*10,index,dead:false,collapse:0,hit:0,seed:Math.floor(rnd()*99999)};const s=document.createElement('canvas');s.width=w;s.height=h+40;const c=s.getContext('2d');c.imageSmoothingEnabled=false;
+function makeBuilding(x,w,h,index){if(currentStage().key==='village'||currentStage().key==='suburb'&&index%3!==0)return makeVillageBuilding(x,w,h,index);let b={x,w,h,hp:260+index*10,max:260+index*10,index,dead:false,collapse:0,hit:0,seed:Math.floor(rnd()*99999),kind:'block',assetId:buildingAssetId('city','block')};const s=document.createElement('canvas');s.width=w;s.height=h+40;const c=s.getContext('2d');c.imageSmoothingEnabled=false;
 const R=(a,b,w,h,col)=>{c.fillStyle=col;c.fillRect(a,b,w,h);};R(0,30,w,h,'#090f24');R(5,32,w-10,h,'#24405e');R(w-19,32,15,h,'#16283f');R(8,34,4,h,'#496480');R(0,26,w,9,'#46617c');R(15,17,w-40,9,'#253b55');R(w/2,0,3,19,'#436080');R(w/2-2,0,7,4,'#ff537b');
 for(let yy=48;yy<h+20;yy+=27){R(8,yy+17,w-24,5,'#12243e');for(let xx=20;xx<w-22;xx+=22){let lit=rnd()>.3;R(xx-3,yy-3,16,19,'#101b31');R(xx,yy,10,12,lit?['#ffd477','#ffe68e','#f9bd55'][Math.floor(rnd()*3)]:'#34577a');R(xx+8,yy,2,12,lit?'#ad8056':'#172d4c');}}
 for(let yy=40;yy<h+20;yy+=70){R(1,yy,6,35,'#65778b');R(w-7,yy,6,32,'#43526f');}
@@ -184,18 +198,19 @@ function fire(x,y,size=30){let tick=Math.floor(time*14);for(let i=0;i<9;i++){let
 
 function drawTank(e){let x=e.x-camera,y=e.y,dir=e.x>p.x?-1:1;ctx.save();ctx.translate(x,y);ctx.scale(dir,1);rect(-41,-10,82,25,'#080f1c');rect(-38,-8,76,19,'#293622');for(let i=-28;i<=28;i+=14){rect(i-5,5,10,10,'#0a1017');rect(i-3,6,6,6,'#85908a');}poly([[-40,-9],[-28,-21],[26,-21],[40,-7]],'#617132');rect(-34,-17,64,5,'#89934a');rect(-17,-36,39,19,'#53602b');rect(-10,-41,21,7,'#72813b');rect(17,-32,47,7,'#758348');rect(54,-33,13,9,'#323e2d');rect(-7,-31,7,5,'#101c25');rect(-31,-9,8,4,'#f0c54d');rect(29,-9,7,4,'#e3843e');if(e.type==='rocket'){rect(-26,-47,47,17,'#29352c');for(let i=0;i<4;i++)rect(-23+i*11,-44,7,11,'#829071');}if(e.hit>0){ctx.globalAlpha=.45;rect(-40,-40,80,54,'#fff3bc');ctx.globalAlpha=1;}ctx.restore();}
 function drawHeli(e){let x=e.x-camera,y=e.y,dir=e.x>p.x?-1:1;ctx.save();ctx.translate(x,y);ctx.scale(dir,1);poly([[-42,-12],[17,-22],[41,-12],[45,4],[27,17],[-29,13]],'#070f1e');poly([[-37,-9],[16,-17],[36,-8],[38,2],[22,11],[-25,9]],'#606a2d');rect(-32,-6,57,7,'#92944b');rect(9,-13,12,12,'#73cbd2');rect(23,-9,10,10,'#55a9bc');rect(8,-12,3,11,'#243731');rect(-8,-10,10,19,'#293b2d');rect(-68,-8,35,5,'#68793b');poly([[-70,-16],[-61,-15],[-57,3],[-66,3]],'#83904a');rect(-70,-23,3,34,'#152133');rect(-78,-8,18,3,'#adb3a0');rect(-7,-28,5,12,'#536b70');let rw=35+Math.abs(Math.sin(time*60))*37;rect(-rw,-30,rw*2,3,'#909cad');rect(-20,20,52,3,'#8b9ca1');rect(-16,12,3,10,'#627885');rect(23,12,3,10,'#627885');rect(-22,7,6,4,Math.sin(time*6)>0?'#ff395c':'#682d47');if(e.hit>0){ctx.globalAlpha=.5;rect(-40,-20,80,38,'#fff2bd');ctx.globalAlpha=1;}ctx.restore();}
+/* 单位变体：从 drawEnemy 的分支链里提出来，好让"哪个单位用哪个绘制函数"
+ * 变成 assets/asset-index.js 里的一条声明（renderer 字段）。绘制内容一字未改。 */
+function drawGunship(e){ctx.save();let x=e.x-camera,y=e.y;ctx.translate(x,y);ctx.scale(1.3,1.2);drawHeli({...e,x:camera,y:0});rect(-50,8,25,12,'#464e65');rect(18,13,29,8,'#283e5c');rect(-44,11,7,5,'#e07e57');ctx.restore();}
+function drawMech(e){let x=e.x-camera,y=e.y;ctx.save();ctx.translate(x,y);let step=Math.sin(time*3+e.phase)*4;rect(-50,-14,38,23,'#1a2639');rect(12,-14,38,23,'#1a2639');rect(-45,-48+step,28,40,'#516277');rect(16,-48-step,28,40,'#516277');poly([[-56,-45],[-45,-103],[40,-103],[60,-45]],'#263d59');rect(-45,-101,85,18,'#6c7b85');rect(-74,-88,147,12,'#3e5570');rect(-86,-93,30,23,'#668291');rect(-91,-90,12,17,'#85f2ff');rect(-12,-118,30,18,'#364e6b');rect(-6,-113,16,6,'#ff665f');for(let i=-34;i<40;i+=19)rect(i,-62,10,5,'#e89e64');ctx.restore();}
+function drawAegis(e){ctx.save();ctx.translate(e.x-camera,e.y);ctx.scale(1.3,1.2);drawTank({...e,x:camera,y:0,type:'rocket'});rect(-15,-61,10,29,'#40576e');rect(-5,-59,55,10,'#7293aa');rect(43,-62,20,15,'#74dfff');if(e.state==='alive'&&Math.sin(time*3)>.1){ctx.globalAlpha=.35;line([[59,-56],[69,-39],[69,1]],'#7cddff',3);ctx.globalAlpha=1;}ctx.restore();}
 function drawBuildings(layer){for(let b of buildings){if(b.layer!==layer)continue;let x=b.x-camera,y=b.ground-b.h-30;if(x<-240||x>W+150)continue;ctx.save();if(layer===0)ctx.globalAlpha=.75;
 if(b.dead){if(b.collapse<2.7){let t=b.collapse;for(let j=0;j<b.floorCount;j++){let sh=(b.h+40)/b.floorCount,local=Math.max(0,t-j*.035),fall=local*local*180,yy=y+j*sh+fall;if(yy>b.ground)continue;ctx.save();ctx.translate(x+b.w/2+Math.sin(j*2.1)*local*18,yy+sh/2);ctx.rotate(b.tilt*local*(b.floorCount-j));ctx.drawImage(b.texture,0,j*sh,b.w,sh,-b.w/2,-sh/2,b.w,sh+1);ctx.restore();}}for(let j=0;j<8;j++)rect(x+j*b.w/8,b.ground-4-(j%3)*7,b.w/7,10+j%3*7,['#263748','#4b5a6d','#1c293d'][j%3]);ctx.restore();continue;}
 ctx.drawImage(b.texture,x,y,b.w,b.h+40);if(layer===2){ctx.globalAlpha=.24;rect(x,b.ground-b.h,b.w,b.h,'#070b1c');ctx.globalAlpha=1;}if(b.hit>0){ctx.globalAlpha=b.hit*2;rect(x,b.ground-b.h,b.w,b.h,'#ffe3b5');ctx.globalAlpha=1;}if(b.hp<b.max*.8){let ratio=1-b.hp/b.max;for(let j=0;j<3;j++){let yy=b.ground-b.h+60+j*b.h/3;line([[x+b.w*.7,yy-30],[x+b.w*.35,yy],[x+b.w*.62,yy+20],[x+b.w*.28,yy+55]],'#080d20',4+ratio*5);}fire(x+b.w*.64,b.ground-b.h*.55,20+ratio*45);}ctx.restore();}}
 function drawForeground(){if(currentStage().key!=='city')return;for(let i=-1;i<9;i++){let x=i*840+100-camera*1.13;if(x<-190||x>W+100)continue;let w=148,h=155+i%3*44,y=H-h;rect(x,y,w,h,'#090f22');rect(x+7,y+6,130,h,'#102039');rect(x-10,y-6,w+20,12,'#24334a');for(let yy=y+20;yy<H;yy+=25)for(let xx=16;xx<w-10;xx+=25)rect(x+xx,yy,9,13,(xx+yy)%3===0?'#9d825d':'#29415a');rect(x+35,y-35,60,29,'#16263e');rect(x+45,y-31,9,20,'#35465d');rect(x+98,y-65,3,65,'#2b405a');line([[x+100,y-55],[x+320,y+10],[x+560,y-25]],'#080e1d',3);}}
 function drawEnemy(e){if(e.state==='gone'||e.state==='exploding')return;if(e.x-camera<-200||e.x-camera>W+180)return;ctx.save();let dying=e.state!=='alive';if(dying){ctx.translate(e.x-camera,e.y);ctx.rotate(e.rotation);}let temp=dying?{...e,x:camera,y:0,hit:0}:e;
 let flying=/heli|gunship|jet|drone/.test(e.type);
-if(flying){if(e.type==='gunship'){ctx.save();let x=temp.x-camera,y=temp.y;ctx.translate(x,y);ctx.scale(1.3,1.2);drawHeli({...temp,x:camera,y:0});rect(-50,8,25,12,'#464e65');rect(18,13,29,8,'#283e5c');rect(-44,11,7,5,'#e07e57');ctx.restore();}else if(e.type==='jet')drawJet(temp);else if(e.type==='drone')drawDrone(temp);else drawHeli(temp);}
-else if(e.type==='mech'){let x=temp.x-camera,y=temp.y;ctx.save();ctx.translate(x,y);let step=Math.sin(time*3+e.phase)*4;rect(-50,-14,38,23,'#1a2639');rect(12,-14,38,23,'#1a2639');rect(-45,-48+step,28,40,'#516277');rect(16,-48-step,28,40,'#516277');poly([[-56,-45],[-45,-103],[40,-103],[60,-45]],'#263d59');rect(-45,-101,85,18,'#6c7b85');rect(-74,-88,147,12,'#3e5570');rect(-86,-93,30,23,'#668291');rect(-91,-90,12,17,'#85f2ff');rect(-12,-118,30,18,'#364e6b');rect(-6,-113,16,6,'#ff665f');for(let i=-34;i<40;i+=19)rect(i,-62,10,5,'#e89e64');ctx.restore();}
-else if(e.type==='aegis'){ctx.save();ctx.translate(temp.x-camera,temp.y);ctx.scale(1.3,1.2);drawTank({...temp,x:camera,y:0,type:'rocket'});rect(-15,-61,10,29,'#40576e');rect(-5,-59,55,10,'#7293aa');rect(43,-62,20,15,'#74dfff');if(alive(e)&&Math.sin(time*3)>.1){ctx.globalAlpha=.35;line([[59,-56],[69,-39],[69,1]],'#7cddff',3);ctx.globalAlpha=1;}ctx.restore();}
-else if(e.type==='walker')drawWalker(temp);
-else if(e.type==='bunker')drawBunker(temp);
-else drawTank(temp);if(dying)fire(0,10,flying?30:20);ctx.restore();}
+/* 绘制函数由资产索引的 renderer 字段指定，不再是 if/else 分支链。 */
+(UNIT_RENDERERS[TYPES[e.type].renderer]||drawTank)(temp);if(dying)fire(0,10,flying?30:20);ctx.restore();}
 function drawJet(e){let x=e.x-camera,y=e.y,dir=e.x>p.x?-1:1;ctx.save();ctx.translate(x,y);ctx.scale(dir,1);
 poly([[-34,-6],[18,-12],[34,-4],[30,4],[-30,8]],'#0c1726');poly([[-30,-4],[16,-9],[32,-3],[28,3],[-26,6]],'#3a4658');
 rect(-6,-18,20,12,'#54627a');rect(2,-15,12,7,'#7fb4cf');rect(-34,-2,12,4,'#ffb13c');rect(10,-2,10,4,'#e0573a');rect(-22,2,4,12,'#27303f');
@@ -213,30 +228,31 @@ function drawBunker(e){let x=e.x-camera,y=e.y;ctx.save();ctx.translate(x,y);
 poly([[-52,-4],[52,-4],[44,-46],[-44,-46]],'#202c3e');rect(-44,-44,88,42,'#33465c');rect(-30,-40,18,18,'#0c1726');rect(8,-40,18,18,'#0c1726');rect(-6,-34,12,12,'#ff6b63');
 rect(-14,-12,28,10,'#3a4a5e');rect(-8,-16,16,8,'#5d6f82');rect(-50,-6,100,8,'#1a2433');
 if(e.hit>0){ctx.globalAlpha=.4;rect(-54,-50,108,56,'#fff3bc');ctx.globalAlpha=1;}ctx.restore();}
+/* 绘制函数名 → 实现。名字由 assets/asset-index.js 的 ENEMY_UNITS[].renderer 给出，
+ * 测试会校验每个登记单位的 renderer 都能在这张表里找到（漏写不会静默退化成坦克）。 */
+const UNIT_RENDERERS={drawTank,drawHeli,drawGunship,drawJet,drawDrone,drawMech,drawAegis,drawWalker,drawBunker};
 function drawWrecks(){for(let w of wrecks){let x=w.x-camera;if(x<-200||x>W+100)continue;ctx.save();ctx.translate(x,w.y);ctx.rotate(w.angle);rect(-31,-18,65,20,'#141e2b');poly([[-20,-18],[-8,-35],[18,-29],[34,-15]],'#394352');rect(-26,-8,12,9,'#4c5b65');rect(15,-8,12,9,'#4c5b65');ctx.restore();}}
 function drawGodzilla(sk,bs){skeleton.draw(ctx,sk,camera,bs);drawMorph(ctx,sk,camera,bs);let a=p.action;if(a.name==='beam'){let charge=clamp(a.t/.95,0,1),m=sk.muzzle;for(let i=0;i<11;i++){let tail=sk.bones.tail_base,head=sk.bones.head,x=tail.x+(head.x-tail.x)*i/10-50,y=tail.y+(head.y-tail.y)*i/10-50;if(a.t<3.6){let pulse=(Math.sin(time*15-i*.7)+1)/2;ctx.globalAlpha=pulse*.6*charge;rect(x-camera-7,y-7,14,14,a.super?'#ff8a5a':beamColor());}}ctx.globalAlpha=1;if(a.t<1.05){for(let i=0;i<13;i++){let angle=i/13*Math.PI*2+time*4,r=(1-charge)*55+5;rect(m.x-camera+Math.cos(angle)*r,m.y+Math.sin(angle)*r,4,4,'#9affff');}rect(m.x-camera-5,m.y-5,10,10,'#edffff');}}
 if(a.name==='claw'&&a.t>.44&&a.t<.72){let c=sk.claw;for(let j=0;j<3;j++)line([[c.x-camera-75,c.y-80+j*17],[c.x-camera+20,c.y-22+j*17],[c.x-camera-10,c.y+25+j*17]],'#b6f5ff',4);}if(a.name==='tail'&&a.t>.6&&a.t<1.05){let c=sk.tail;line([[c.x-camera-25,c.y-40],[c.x-camera-60,c.y],[c.x-camera+50,c.y+20]],'#b3cee0aa',7);}}
-/* 程序化绘制 morph（背刺、染色、眼/角/护甲/光环），接在骨骼之上。
- * 不改主画面基础美术，只在身体轮廓上叠加可见体征；颜色/数量由天赋与突变决定。 */
+/* 程序化绘制形态体征（背鳍、角、眼、护甲、辉光、体色），接在骨骼之上。
+ * 「哪个突变改哪个槽的哪个轴」全部声明在 appearance.js 的 decor()，
+ * 这里只负责把解算结果画出来 —— 以后加新体征改的是那张声明表，不是这条函数。 */
 function spineAt(pts,f){let tot=0,seg=[];for(let i=0;i<pts.length-1;i++){let d=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y);seg.push(d);tot+=d;}let d=f*tot;for(let i=0;i<seg.length;i++){if(d<=seg[i]||i===seg.length-1){let u=seg[i]?d/seg[i]:0;return{x:pts[i].x+(pts[i+1].x-pts[i].x)*u,y:pts[i].y+(pts[i+1].y-pts[i].y)*u};}d-=seg[i];}}
-function drawMorph(c,rs,cam,bs){const b=rs.bones,m=data.morph||{},t=data.talents||{},s=bs||1;
+function drawMorph(c,rs,cam,bs){const b=rs.bones,s=bs||1;
+  const D=Appearance.decor({form:Appearance.FORMS[economy.epochIndex()],epoch:economy.epoch(),morph:data.morph,talents:data.talents,elementColor:elementColor(),beamColor:beamColor()});
   const sp=[b.tail_tip,b.tail_mid,b.tail_base,b.torso,b.head].map(p=>({x:p.x-cam,y:p.y}));
-  let n=2+(economy.epoch().spikes||3)+(t.spines||0)+(m.spikes||0);
-  let hS=(1+0.2*(t.spines||0))*(m.spikeScale||1)*s,col=spineColor(),fork=(t.spines||0)>=1||(m.spikeScale||1)>1.1;
-  for(let i=1;i<=n;i++){let f=i/(n+1),P=spineAt(sp,f),hs=(9+i*0.5)*hS+(m.spikes||0)*2*s,ty=P.y-hs,w=5*s;
+  const sd=D.spikes,n=sd.count,hS=sd.heightScale*s,col=sd.color,fork=sd.fork;
+  for(let i=1;i<=n;i++){let f=i/(n+1),P=spineAt(sp,f),hs=(9+i*0.5)*hS+sd.bonus*2*s,ty=P.y-hs,w=5*s;
     poly([[P.x-w,P.y],[P.x,ty],[P.x+w,P.y]],col);
     if(fork)poly([[P.x-w*.4,P.y-hs*.6],[P.x-w*1.2,ty],[P.x,ty]],col),poly([[P.x+w*.4,P.y-hs*.6],[P.x+w*1.2,ty],[P.x,ty]],col);
     if(hs>14*s){c.globalAlpha=.5;poly([[P.x-w*.4,P.y-hs*.5],[P.x,ty-hs*.4],[P.x+w*.4,P.y-hs*.5]],'#fff3c8');c.globalAlpha=1;}}
-  if(m.horns){let h=b.head;for(let k=0;k<(m.horns>1?2:1);k++){let ox=(k?18:-14)*s;poly([[h.x-cam+ox-4*s,h.y-30*s],[h.x-cam+ox,h.y-(58+(m.horns>1?8:0))*s],[h.x-cam+ox+4*s,h.y-30*s]],'#dfe6ee');}}
-  if(m.eyeGlow){let h=b.head;c.save();c.globalAlpha=.6;c.fillStyle='#ff5a4a';c.beginPath();c.ellipse(h.x-cam-22*s,h.y-6*s,9*s,6*s,0,0,7);c.fill();c.restore();}
-  if(m.thirdEye){let h=b.head;c.save();c.globalAlpha=.85;c.fillStyle='#ffe06a';c.beginPath();c.arc(h.x-cam,h.y-26*s,5*s,0,7);c.fill();c.restore();}
-  if(m.plates){let to=b.torso;c.save();c.globalAlpha=.5;c.strokeStyle='#0c1726';c.lineWidth=Math.max(1,3*s);for(let r=-1;r<=1;r++)for(let q=-1;q<=1;q++)c.strokeRect(to.x-cam+r*34*s-12*s,to.y+q*30*s-14*s,24*s,28*s);c.restore();}
-  if(m.aura||t.radiant){let to=b.torso;c.save();c.globalAlpha=.35;for(let i=0;i<6;i++){let ang=time*.6+i/6*6.28,rr=(70+Math.sin(time*2+i)*8)*s;c.fillStyle=beamColor();c.beginPath();c.arc(to.x-cam+Math.cos(ang)*rr,to.y+Math.sin(ang)*rr,4*s,0,7);c.fill();}c.restore();}
-  if(m.hue==='crimson'){let to=b.torso;c.save();c.globalAlpha=.18;c.fillStyle='#ff3b2e';c.fillRect(to.x-cam-130*s,to.y-170*s,260*s,210*s);c.restore();}
-  else if(m.hue==='albino'){let to=b.torso;c.save();c.globalAlpha=.14;c.fillStyle='#eaf6ff';c.fillRect(to.x-cam-130*s,to.y-170*s,260*s,210*s);c.restore();}
-  else if(m.hue==='obsidian'){let to=b.torso;c.save();c.globalAlpha=.22;c.fillStyle='#0a0a12';c.fillRect(to.x-cam-130*s,to.y-170*s,260*s,210*s);c.restore();}
-  else if(m.hue==='jade'){let to=b.torso;c.save();c.globalAlpha=.16;c.fillStyle='#2fae6a';c.fillRect(to.x-cam-130*s,to.y-170*s,260*s,210*s);c.restore();}
-  if(m.twinTail){let tt=b.tail_tip;c.save();c.translate(tt.x-cam,tt.y);c.scale(-1,1);poly([[-10*s,0],[20*s,-14*s],[34*s,0]],col);c.restore();}}
+  const hd=D.horns;if(hd.count){let h=b.head;for(let k=0;k<hd.blades;k++){let ox=(k?18:-14)*s;poly([[h.x-cam+ox-4*s,h.y-30*s],[h.x-cam+ox,h.y-hd.heightPx*s],[h.x-cam+ox+4*s,h.y-30*s]],'#dfe6ee');}}
+  if(D.eye.glow){let h=b.head;c.save();c.globalAlpha=.6;c.fillStyle='#ff5a4a';c.beginPath();c.ellipse(h.x-cam-22*s,h.y-6*s,9*s,6*s,0,0,7);c.fill();c.restore();}
+  if(D.eye.third){let h=b.head;c.save();c.globalAlpha=.85;c.fillStyle='#ffe06a';c.beginPath();c.arc(h.x-cam,h.y-26*s,5*s,0,7);c.fill();c.restore();}
+  if(D.plates.on){let to=b.torso;c.save();c.globalAlpha=.5;c.strokeStyle='#0c1726';c.lineWidth=Math.max(1,3*s);for(let r=-1;r<=1;r++)for(let q=-1;q<=1;q++)c.strokeRect(to.x-cam+r*34*s-12*s,to.y+q*30*s-14*s,24*s,28*s);c.restore();}
+  if(D.aura.on){let to=b.torso;c.save();c.globalAlpha=.35;for(let i=0;i<6;i++){let ang=time*.6+i/6*6.28,rr=(70+Math.sin(time*2+i)*8)*s;c.fillStyle=D.aura.color;c.beginPath();c.arc(to.x-cam+Math.cos(ang)*rr,to.y+Math.sin(ang)*rr,4*s,0,7);c.fill();}c.restore();}
+  if(D.overlay){let to=b.torso;c.save();c.globalAlpha=D.overlay.alpha;c.fillStyle=D.overlay.color;c.fillRect(to.x-cam-130*s,to.y-170*s,260*s,210*s);c.restore();}
+  if(D.tail.twin){let tt=b.tail_tip;c.save();c.translate(tt.x-cam,tt.y);c.scale(-1,1);poly([[-10*s,0],[20*s,-14*s],[34*s,0]],col);c.restore();}}
 function drawBeam(){if(!beam)return;if(beam.fire){drawFlame(beam.x-camera,beam.y,beam.ex-camera,beam.ey,beam.super);for(let a of arcs)line([[a.x-camera,a.y],[(a.x+a.ex)/2-camera+Math.sin(time*30)*20,(a.y+a.ey)/2-20],[a.ex-camera,a.ey]],'#a4eeff',4);return;}
 let {x,y,ex,ey}=beam;x-=camera;ex-=camera;let colors=beam.super?['#6e142d','#ef394a','#ff8e46','#ffe598','#fff7d5']:[beamColor(),'#9defff','#bff4ff','#e6ffff','#faffee'];[48,34,22,12,5].forEach((w,i)=>line([[x,y],[ex,ey]],colors[i],w));let d=Math.hypot(ex-x,ey-y);for(let i=0;i<d;i+=16){let t=i/d;rect(x+(ex-x)*t+Math.sin(i+time*40)*8,y+(ey-y)*t+Math.cos(i+time*33)*17,8,5,colors[i%3+2]);}for(let a of arcs)line([[a.x-camera,a.y],[(a.x+a.ex)/2-camera+Math.sin(time*30)*20,(a.y+a.ey)/2-20],[a.ex-camera,a.ey]],'#a4eeff',4);}
 /* 火焰呼吸：与光束完全不同的造型——沿吐息方向张开的锥形火舌（多层叠色 + 飘动余烬），

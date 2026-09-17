@@ -6,29 +6,37 @@
 
 ## 造型修正
 
-上一版重新生成的部件图集改变了原角色的躯干与腿部比例，不能视为与原图一致。本版不再使用该图集作为运行主角，而是直接按解剖部位拆分 `assets/godzilla-pixel.png`。
+上一版重新生成的部件图集改变了原角色的躯干与腿部比例，不能视为与原图一致。本版不再使用该图集作为运行主角，而是直接按解剖部位拆分母图 `assets/monsters/godzilla/source/godzilla-pixel.png`。
 
 原图每个像素只分配到一个部件，保持统一 0.40 倍比例。将十二部件恢复到绑定姿态后，与原始像素角色合成到相同底色比较，最大 RGB 差值为 0。此验证针对静止绑定姿态，不表示运动时轮廓始终不变。
 
 ## 运行资产
 
-运行时只加载下面这四项，`assets/` 里其余内容都不参与运行：
+运行时只加载下面这几项，`assets/` 里其余内容都不参与运行：
 
-- `assets/godzilla-pixel.png`：批准的完整像素角色，也是 `parts.json` 裁切坐标的母图。
-- `assets/rig-source/`：躯干、头、下颌、上臂、前臂、近侧大腿与胫足、远侧大腿与胫足、尾根、尾中、尾尖，共十二个透明 PNG。
-- `assets/rig-source/parts.json`：原图裁切坐标、原始枢轴、像素尺寸与统一比例。
+- `assets/monsters/godzilla/source/godzilla-pixel.png`：批准的完整像素角色，也是裁切坐标的母图。
+- `assets/monsters/godzilla/parts/<槽位>/default.png`：十二个透明 PNG 部件，
+  位于躯干、头、下颌、上臂、前臂、近侧大腿与胫足、远侧大腿与胫足、尾根、尾中、尾尖
+  各自以槽位命名的目录下。
+- `assets/monsters/godzilla/source/parts.json`：母图空间的裁切坐标、原始枢轴、像素尺寸与统一比例。
+- `assets/monsters/godzilla/rig.json` + `rig.data.js`：由 `build/derive-rig.cjs`
+  从上一项推导出的运行空间骨骼数据（枢轴偏移、基准尺寸、绘制顺序、父子关系）。
+- `assets/asset-index.js`：贴图路径的唯一真相。
+- `appearance.js`：形态与「样式 / 颜色 / 大小」三轴的解算。
 - `rig.js`：13 个唯一变换节点（根节点 + 十二部件）；父子变换、关键帧曲线与运行时接缝。
 
 以下都是验收期的一次性产物，**已在 2026-09-17 的工程整理中移除**（上面「造型修正」一节的
 结论仍然成立，它们只是当时的取证材料，不是运行资产）：
 
-- `assets/rig/`（旧版方案目录）与 `godzilla-parts-atlas.png`（旧版图集）——游戏从不加载。
-- `assets/rig-source/neutral-reassembled.png`（静止重组图）、`original-comparison.png`（原图对照）——
+- 旧版方案目录 `rig/` 与旧版图集 `godzilla-parts-atlas.png`——游戏从不加载。
+- `neutral-reassembled.png`（静止重组图）、`original-comparison.png`（原图对照）——
   上节 0 差值比较的取证图。
-- `assets/rig-source/preview-*.webp`（六组透明动画预览，每组 24 个姿态）、`animation-contact.png`
+- `preview-*.webp`（六组透明动画预览，每组 24 个姿态）、`animation-contact.png`
   （行走、爪击、吐息、重踏、咆哮、尾扫联系表）——动作验收预览。
 
-需要复现这些材料时，从 `assets/godzilla-pixel.png` 按 `parts.json` 重新拆件即可，两者都还在。
+需要复现这些材料时，从 `source/godzilla-pixel.png` 按 `source/parts.json` 重新拆件即可，两者都还在。
+改完母图后必须跑 `node build/derive-rig.cjs` 重推 `rig.json`，否则枢轴会与母图脱钩
+（测试会拦下来，见 `docs/资产规范.md` §4.3）。
 
 ## 动画实现
 

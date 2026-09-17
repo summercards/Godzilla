@@ -236,10 +236,15 @@ save-store.js          存档仓库：原子写、备份轮转、导出导入（
 tv-config.js           档位与注入内容（主进程与开发工具共用同一份）
 CHANGELOG.md           版本改动与验证记录
 tv/                    被播放的画面：一份完整的挂机直播游戏，独立可跑，桌宠不改它
-  index.html game.js progression.js rig.js style.css
-  assets/              部件图、字库、动作预览
+  index.html game.js progression.js rig.js appearance.js style.css
+  assets/              游戏资产：asset-index.js 是全部路径的唯一真相
+    monsters/<怪兽>/   本体：parts/<槽位>/<样式>.png、rig.json、source/ 母图
+    enemies/<阵营>/<单位>/  敌对单位
+    buildings/<幕>/<种类>/  建筑
+    fonts/             字库
   README.md DESIGN.md ART-DIRECTION.md CHANGELOG.md
   tests/idle.cjs       它自己的逻辑自检，8 项
+  tests/assets.test.cjs 资产规范的可执行版本，8 项
 dist/                  发布产物
   巨兽都市-挂机直播.html   画面的离线单文件版，双击即玩
 assets/
@@ -248,8 +253,12 @@ assets/
 build/
   make-icons.py        托盘 / 应用图标生成器，带 --preview 终端预览
   make-app.sh          生成并安装可双击的 .app（默认 ~/Applications）
+  derive-rig.cjs       从母图裁切元数据推导 rig.json / rig.data.js，--check 只校验
   tv-shot.cjs          按档位抓图，并回读版面与 app-region 实测值
   cdp-probe.cjs        用远程调试端口查运行中的窗口到底加载了什么
+docs/
+  怪物形态框架.md       怪物 → 形态 → 部件槽 → {样式, 颜色, 大小}
+  资产规范.md           强制约束：目录、命名、贴图规格、三轴取值、反例
 tests/
   tv.test.cjs          档位、注入、存档接管与面板的契约，16 项
   save-store.test.cjs  存档持久化的契约，20 项

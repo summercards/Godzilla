@@ -45,4 +45,5 @@
 <div id="offline" class="offline" hidden><div><b>离线观测已完成</b><p id="offlineText"></p></div><button id="dismissOffline" aria-label="关闭离线收益通知">×</button></div><div id="notice" class="notice" role="status"></div>
 </section></main></div>
 <footer><span>■ 自动运行中 · 近战优先</span><span>16:9 / PIXEL BROADCAST</span></footer></div>
-<script src="progression.js"></script><script src="rig.js"></script><script src="game.js"></script></body></html>
+<!-- 资产层加载顺序：索引（路径）→ 骨骼数据（结构）→ 形态（样式/颜色/大小）→ 装配 → 渲染 -->
+<script src="progression.js"></script><script src="assets/asset-index.js"></script><script src="assets/monsters/godzilla/rig.data.js"></script><script src="appearance.js"></script><script src="rig.js"></script><script src="game.js"></script></body></html>
