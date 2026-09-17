@@ -25,7 +25,7 @@ Godzilla/
 | 玩桌宠 | `cd godzilla-pet && npm install && sh build/make-app.sh` → 双击 `~/Applications/巨兽都市桌宠.app` |
 | 只跑电视画面 | 双击 `godzilla-pet/dist/巨兽都市-挂机直播.html`（离线单文件，不需要服务器） |
 | 改电视画面的源码 | `cd godzilla-pet/tv && python3 -m http.server 8765` |
-| 自检 | `cd godzilla-pet && npm test`（31 项，另有 8 项仅 macOS）· `node tv/tests/idle.cjs`（8 项） |
+| 自检 | `cd godzilla-pet && npm test`（67 项，已含电视画面的端到端自检） |
 
 `npm start` 是在终端前台跑一个，**终端一关它就没了**，只适合调试。
 日常用走 `make-app.sh` 装成真正的应用。
@@ -62,9 +62,11 @@ macOS 下是 `~/Library/Application Support/巨兽都市桌宠/save/tv.json`。
 
 | 文件 | 是什么 |
 | --- | --- |
-| `雨夜新宿.html` | 与 `godzilla-pet/dist/巨兽都市-挂机直播.html` 逐字节相同的重名副本（同 MD5），改名时误留的那一份 |
-| `雨夜新宿-游戏与源码.zip` | 更早的街机版存档：玩家还能操作的那一版，内容已过时 |
-| `巨兽都市-挂机版与源码.zip` | 旧版全量打包，已被仓库目录内容取代 |
+| `雨夜新宿-游戏与源码.zip` | 更早的街机版存档：玩家还能操作的那一版，内容已过时。解开来是完整可跑的一套 |
+
+> 早期还有一份 `雨夜新宿.html`（与 `godzilla-pet/dist/巨兽都市-挂机直播.html`
+> 逐字节相同的重名副本）和一个旧版全量打包 zip，两份都已在 2026-09-17 的工程整理中移除：
+> 前者是改名时误留的重复文件，后者早已被仓库目录完全取代。
 
 ## 技术说明
 

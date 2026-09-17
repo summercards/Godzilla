@@ -123,6 +123,12 @@ button:disabled{cursor:default}h1,h2,h3,h4,p{font-weight:400;margin:0}
 .tabs button{position:relative;background:#152b43;color:#dbeaf2;border:2px solid #45617b;box-shadow:3px 3px 0 #071025;padding:8px 12px;font-size:14px;letter-spacing:1px}
 .tabs button[aria-selected="true"]{background:#1d3c58;border-color:#7fb0c8;color:#fff}
 .tab-badge{position:absolute;top:-3px;right:-3px;min-width:14px;height:14px;padding:0 2px;background:#d73547;color:#fff;font-size:11px;font-style:normal;line-height:14px;text-align:center;box-shadow:2px 2px 0 #071025}
+/* 主界面「加点」角标：加点不自动花（见 progression.js autoSpend），
+ * 所以玩家挂机回来必须在电视上就能看见"有几点没花"，否则这件仪式感白留。 */
+#open-assign{position:relative}
+/* 字号必须 ≥ 左侧按钮文字（.pb-tx 17px）——build/tv-shot.cjs 有硬断言：
+ * 「所有可见文字不得小于左侧按钮」。角标 12px 会直接把验收跑红，所以取 17px。 */
+.hud-badge{position:absolute;top:-9px;right:-9px;min-width:26px;height:26px;padding:0 4px;background:#d73547;color:#fff;font-size:17px;font-style:normal;line-height:26px;text-align:center;box-shadow:2px 2px 0 #071025;z-index:2}
 .assign-head{display:flex;align-items:center;gap:10px;margin:0 0 12px;padding:8px 10px;border:2px solid #45617b;background:#122238}
 .assign-head>span{color:#98acc1;font-size:13px}.assign-head strong{color:#eeecd3;font-size:18px;margin-left:2px}.assign-head .pixel-button{margin-left:auto}
 .talent-sub{color:#98acc1;font-size:12px;margin-left:auto}.talent-sub b{color:#eeecd3}

@@ -9,7 +9,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "test": "node --test \"tests/*.test.cjs\"",
+    "test": "node --test \"tests/*.test.cjs\" \"tv/tests/*.cjs\"",
     "icons": "python3 build/make-icons.py"
   },
   "devDependencies": {

@@ -149,3 +149,75 @@ test('迁移：同一个旧档派生出的 seed 完全一致', () => {
   const s2 = P.sanitize(old).seed;
   assert.equal(s1, s2, 'seed 派生必须是确定性的');
 });
+
+/* ------------------------------------------------------------------ *
+ * 以下五条守住 2026-09-17 修掉的三处 P0。
+ *
+ * 之前没有任何测试在看这几个开关，所以 6e5e10c 那次提交把 auto 默认值翻成
+ * false 时 61 项测试全绿 —— 而实际效果是：全新用户挂机八小时，回来看见一只
+ * 强化停在 1/1/1/1、技能 0 个、突变 0 个的巨兽（实测 LV13 / 城区 31，
+ * 而同一段时间开着托管是 LV28 / 城区 184）。
+ * ------------------------------------------------------------------ */
+
+/* P0-1：默认必须是托管的。 */
+test('托管：默认开启，旧档没写过 auto 也跟随默认，显式关过才保持关', () => {
+  assert.equal(new P.Economy().data.auto, true, '全新档默认必须托管');
+  assert.equal(P.sanitize({ version: 4, level: 5 }).auto, true, 'version 4 旧档没写过 auto 应跟随产品默认');
+  assert.equal(P.sanitize({ version: 3, level: 5 }).auto, true, 'version 3 老档同理');
+  assert.equal(P.sanitize({ version: 4, level: 5, auto: false }).auto, false, '玩家显式关过必须保持关');
+  assert.equal(P.sanitize({ version: 4, level: 5, auto: true }).auto, true);
+});
+
+/* P0-1 的另一半：托管要真的花出去，但加点机会绝不替玩家花。 */
+test('托管：autoSpend 会强化与解锁技能，但绝不替玩家花加点机会', () => {
+  const e = new P.Economy({ version: 4, energy: 100000, dna: 100, level: 20, assign: 5 });
+  e.data.levels = { power: 1, atomic: 1, metabolism: 1, stride: 1 };
+  const sum = () => e.data.levels.power + e.data.levels.atomic + e.data.levels.metabolism + e.data.levels.stride;
+  assert.equal(sum(), 4);
+  e.autoSpend();
+  assert.ok(sum() > 4, 'autoSpend 必须自动强化');
+  assert.ok(e.data.skills.length > 0, 'autoSpend 必须自动解锁技能');
+  assert.equal(e.data.assign, 5, '加点机会必须原样留着 —— 那是留给玩家回来点的仪式感');
+});
+
+/* P0-2：离线必须发 XP。等级是 dna / 加点 / 进化机会 / 天赋点的唯一发钞口，
+ * 离线不发 XP 等于挂机这条路完全不成长。 */
+test('离线：必须结算经验，挂机不再原地踏步', () => {
+  const e = new P.Economy();
+  e.data.lastSeen = Date.now() - 8 * 3600 * 1000;
+  const report = e.offline(Date.now());
+  assert.ok(report, '8 小时离线必须给出结算');
+  assert.ok(report.xp > 0, '离线必须发经验');
+  assert.ok(e.data.level > 1, `离线 8 小时应至少升几级，实测停在 LV${e.data.level}`);
+});
+
+/* P0-2 的边界：离线 XP 折算比必须低于在线实测的 XP/核能 比（0.131），
+ * 否则「关掉比开着赚」会从核能蔓延到等级。 */
+test('离线：经验折算比低于在线实测的 XP/核能 比', () => {
+  for (const [lv, st] of [[1, 1], [25, 20], [100, 90]]) {
+    const e = new P.Economy({ version: 4, level: lv });
+    e.data.levels = { power: st, atomic: st, metabolism: st, stride: st };
+    e.data.lastSeen = Date.now() - 8 * 3600 * 1000;
+    const r = e.offline(Date.now());
+    const ratio = r.xp / r.amount;
+    assert.ok(ratio > 0, `LV${lv} 离线没发经验`);
+    assert.ok(ratio < 0.131, `LV${lv} 的离线 XP/核能 = ${ratio.toFixed(3)}，高于在线实测的 0.131`);
+  }
+});
+
+/* P0-3：经验单价必须随区域增长。写死常数会让等级永久追不上区域推进 ——
+ * 实测 xpPerEnemy(50) 应为 124，而 game.js 当时只发 12。 */
+test('经验曲线：单价随区域单调递增，且第 1 区与旧写死值一致', () => {
+  assert.equal(P.xpPerEnemy(1), 12, '第 1 区击杀经验与旧写死值一致（这就是这个 bug 开局一小时看不见的原因）');
+  assert.equal(P.xpPerBuilding(1, 1), 24, '第 1 区主楼经验与旧写死值一致');
+  assert.equal(P.xpPerBuilding(1, 0), 12, '第 1 区非主楼经验与旧写死值一致');
+  assert.equal(P.xpPerDistrict(1), 60, '第 1 区破区经验与旧写死值一致');
+  assert.ok(P.xpPerEnemy(50) > P.xpPerEnemy(1) * 5, '第 50 区击杀经验应远高于第 1 区');
+  for (let d = 2; d <= 60; d++) {
+    assert.ok(P.xpPerEnemy(d) > P.xpPerEnemy(d - 1), `xpPerEnemy 在区域 ${d} 应递增`);
+    assert.ok(P.xpPerBuilding(d, 1) > P.xpPerBuilding(d - 1, 1), `xpPerBuilding 在区域 ${d} 应递增`);
+    assert.ok(P.xpPerDistrict(d) > P.xpPerDistrict(d - 1), `xpPerDistrict 在区域 ${d} 应递增`);
+  }
+  assert.equal(P.Ke(1), 1);
+  assert.equal(P.Kb(1), 1);
+});

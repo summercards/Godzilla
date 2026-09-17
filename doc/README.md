@@ -7,7 +7,7 @@
 ```
 doc/
 ├── README.md                    你正在看的这份：索引、阅读顺序、写作约定
-└── game-design/                 游戏设计文档
+└── game-design/                 【规划中 · 尚未建立】游戏设计文档，下列文件一个都还没写
     ├── 01-设计总纲.md            体验目标、设计支柱、铁律、与现有实现的边界
     ├── 02-关卡路线.md            第 2 章 5 个关卡的完整路线设计
     ├── 03-敌人图鉴.md            常规敌人 / 精英单位完整数值表
@@ -16,6 +16,9 @@ doc/
     ├── 06-成长系统.md            等级 / 天赋 / 随机突变 / 体貌映射
     └── 07-成长界面与表现.md      加点 / 天赋 / 进化三个面板、骰子动画、转发链路
 ```
+
+> `game-design/` 是**待写清单**，不是现状：目录本身与上面七个文件目前都不存在，
+> 现有 `doc/` 只有这份 README。本文档出现 `game-design/…` 的地方，都读作「打算写到这里」。
 
 ## 全项目文档地图
 
@@ -38,15 +41,18 @@ doc/
 
 ## 阅读顺序
 
+下表中 `game-design/…` 的条目现在都还是待写文档（按上节说明），只有 `tv/` 与
+`godzilla-pet/` 的几份是真能读到的。实际能用的部分我已标注出来。
+
 | 你想做什么 | 按这个顺序读 |
 | --- | --- |
-| 第一次上手这个项目 | `../README.md` → 本文档 → `godzilla-pet/README.md` → `game-design/01-设计总纲.md` |
-| 改数值 / 平衡 | `tv/DESIGN.md` → `game-design/03-敌人图鉴.md` → `game-design/06-成长系统.md` |
-| 加新关卡 | `game-design/02-关卡路线.md` → `game-design/03-敌人图鉴.md` → `game-design/04-Boss设计.md` |
-| 改角色外观 | `game-design/06-成长系统.md`（体貌映射表）→ `tv/ART-DIRECTION.md` |
-| 改面板 / 加菜单 / 加动效 | `game-design/07-成长界面与表现.md` → `godzilla-pet/panel-preload.js`（面板架构的权威描述在它的文件头） |
-| 改天气 | `game-design/05-天气系统.md` |
-| 动存档格式 | `godzilla-pet/README.md`（存档章节，必须读）→ `game-design/06-成长系统.md`（存档扩展） |
+| 第一次上手这个项目 | `../README.md` → 本文档 → `godzilla-pet/README.md` |
+| 改数值 / 平衡 | `tv/DESIGN.md` |
+| 加新关卡 | `tv/DESIGN.md` → `tv/README.md` |
+| 改角色外观 | `tv/ART-DIRECTION.md` → `tv/rig.js` |
+| 改面板 / 加菜单 / 加动效 | `godzilla-pet/panel-preload.js`（面板架构的权威描述在它的文件头）→ `tv/README.md` |
+| 改天气 | `tv/game.js`（尚无独立天气文档） |
+| 动存档格式 | `godzilla-pet/README.md`（存档章节，必须读）→ `godzilla-pet/save-store.js` |
 
 ## 写作约定
 

@@ -269,6 +269,20 @@ const xpPerBuilding = (d, layer) => Math.round((layer === 1 ? 24 : 12) * Kb(d));
 const xpPerDistrict = (d) => Math.round(60 * Ke(d));
 
 /* ------------------------------------------------------------------ *
+ * 离线经验折算
+ *
+ * 离线只结算被动产能（没有画面就没有击杀），但 XP 必须补 —— 等级是 dna /
+ * 加点机会 / 进化机会 / 天赋点的唯一发钞口，等级一停，四条成长线一起饿死。
+ *
+ * 折算比 0.12 是实测标定出来的：出厂默认在线挂机 8 小时的 XP/核能 ≈ 0.131
+ * （42,048 XP / 321,475 核能），取略低一档作为离线比，保证离线严格劣于在线。
+ *
+ * ⚠️ 不要在这里再乘 xpPerEnemy(district)。amount 已经随 passive() 和等级缩放，
+ * 再乘一次区域单价就是双重缩放 —— 实测那样会把 8 小时离线顶到 LV115。
+ * ------------------------------------------------------------------ */
+const OFFLINE_XP_RATIO = 0.12;
+
+/* ------------------------------------------------------------------ *
  * 体征期：每 25 级一个质变台阶，不单独存储，由 level 推导
  * ------------------------------------------------------------------ */
 const STAGES = [
@@ -328,7 +342,11 @@ const defaults = () => ({
   district: 1, cleared: 0, kills: 0, meters: 0,
   levels: { power: 1, atomic: 1, metabolism: 1, stride: 1 },
   skills: [],
-  auto: false, policy: 'balanced', muted: true,
+  /* auto 默认开。这是"摆在那里自己玩"的产品形态：默认关掉等于让全新用户挂机
+   * 八小时回来看见一只强化全 1 级、技能 0 个、突变 0 个的巨兽（实测 LV13 / 城区 31，
+   * 而同一段时间开着托管是 LV28 / 城区 184）。
+   * 注意 assign（加点机会）仍然不自动花 —— 见 autoSpend() 里的说明。 */
+  auto: true, policy: 'balanced', muted: true,
   lastSeen: Date.now(), world: null,
   // —— 本次新增 ——
   talent: 0,               // 天赋点余额
@@ -366,7 +384,9 @@ function sanitize(raw) {
   for (const k in STATS) a.levels[k] = Math.floor(finite(raw.levels && raw.levels[k], 1, 1, 500));
 
   a.skills = SKILLS.filter((s) => Array.isArray(raw.skills) && raw.skills.includes(s.id)).map((s) => s.id);
-  a.auto = raw.auto === true;
+  /* 旧档没写过 auto 字段时，跟随产品默认（开）；显式关过（存了 false）才保持关。
+   * 用 !== false 而不是 === true：后者会把所有 version 3/4 老档一律判成关闭。 */
+  a.auto = raw.auto !== false;
   a.policy = ['balanced', 'kinetic', 'atomic', 'evolution'].includes(raw.policy) ? raw.policy : 'balanced';
   a.muted = raw.muted !== false;
   a.lastSeen = finite(raw.lastSeen, Date.now(), 0, Date.now());
@@ -625,8 +645,9 @@ class Economy {
     efficiency = Math.min(1, efficiency + 0.05 * (this.data.talents.sleepless || 0));
     const rate = this.passive() + 7 * this.rewardMult();
     const amount = seconds * rate * efficiency;
-    this.gain(amount);
-    return { seconds, amount, efficiency, capped: seconds >= 8 * 3600 };
+    const xp = Math.round(amount * OFFLINE_XP_RATIO);
+    this.gain(amount, xp);
+    return { seconds, amount, xp, efficiency, capped: seconds >= 8 * 3600 };
   }
 
   serialize(now, world) {

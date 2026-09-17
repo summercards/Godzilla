@@ -12,22 +12,29 @@
 
 ## 运行资产
 
-- `assets/godzilla-pixel.png`：批准的完整像素角色。
+运行时只加载下面这四项，`assets/` 里其余内容都不参与运行：
+
+- `assets/godzilla-pixel.png`：批准的完整像素角色，也是 `parts.json` 裁切坐标的母图。
 - `assets/rig-source/`：躯干、头、下颌、上臂、前臂、近侧大腿与胫足、远侧大腿与胫足、尾根、尾中、尾尖，共十二个透明 PNG。
 - `assets/rig-source/parts.json`：原图裁切坐标、原始枢轴、像素尺寸与统一比例。
-- `assets/rig-source/neutral-reassembled.png`：静止重组图。
-- `assets/rig-source/original-comparison.png`：原图与静止重组对照。
-- `assets/rig-source/preview-*.webp`：六组透明动画 QA 预览，每组 24 个姿态。
-- `assets/rig-source/animation-contact.png`：行走、爪击、吐息、重踏、咆哮、尾扫联系表。
 - `rig.js`：13 个唯一变换节点（根节点 + 十二部件）；父子变换、关键帧曲线与运行时接缝。
 
-之前的 `assets/rig/` 与 `godzilla-parts-atlas.png` 保留为历史方案，游戏不加载它们。
+以下都是验收期的一次性产物，**已在 2026-09-17 的工程整理中移除**（上面「造型修正」一节的
+结论仍然成立，它们只是当时的取证材料，不是运行资产）：
+
+- `assets/rig/`（旧版方案目录）与 `godzilla-parts-atlas.png`（旧版图集）——游戏从不加载。
+- `assets/rig-source/neutral-reassembled.png`（静止重组图）、`original-comparison.png`（原图对照）——
+  上节 0 差值比较的取证图。
+- `assets/rig-source/preview-*.webp`（六组透明动画预览，每组 24 个姿态）、`animation-contact.png`
+  （行走、爪击、吐息、重踏、咆哮、尾扫联系表）——动作验收预览。
+
+需要复现这些材料时，从 `assets/godzilla-pixel.png` 按 `parts.json` 重新拆件即可，两者都还在。
 
 ## 动画实现
 
 头部与下颌分别运动，上下臂有独立挥击，双腿错相迈步，三节尾巴逐级摆动。吐息从头部骨骼的嘴部位置发出，爪击和脚部冲击点使用骨骼世界坐标。
 
-在转动关节下方绘制跟随父骨骼的深色像素鳞片补片，减少抬腿和挥爪时内部切口透出城市背景。补片不参与静止绑定姿态的还原比较。运行时连续计算关节，不播放整张立绘平移或预录视频；WebP 仅为资源验收预览。
+在转动关节下方绘制跟随父骨骼的深色像素鳞片补片，减少抬腿和挥爪时内部切口透出城市背景。补片不参与静止绑定姿态的还原比较。运行时连续计算关节，不播放整张立绘平移或预录视频。
 
 ## 像素界面
 
