@@ -5,9 +5,10 @@
  *      复制粘贴迟早会漂移；
  *   2. 截图工具能 require 到真实数值，验证的是应用实际会用的东西。
  *
- * 注入内容分三类，前一类是给 frameless 窗口补把手，后两类只作用于面板窗口：
+ * 注入内容分四类 —— 前两条进电视窗口，后两条只作用于面板窗口：
  *
  *   TV_DRAG_CSS        不改变任何呈现，只补 frameless 窗口缺的拖动把手。
+ *   TV_TRANSPARENT_CSS 抹掉页面自己那两层底色，电视柜以外透出桌面。
  *   PANEL_ONLY_CSS     面板只留观测面板，藏掉直播包装。
  *   PANEL_READABLE_CSS 面板里的字与按钮放大一号。
  *
@@ -76,6 +77,35 @@ const TV_DRAG_CSS = `
   .shell { -webkit-app-region: no-drag; }
   /* 顶部的 GNN 台标条与底部状态条没有可点元素，一并做成第二拖动区 */
   header, footer { -webkit-app-region: drag; }
+`;
+
+/* 电视窗口的"桌面透出"。只在电视窗口注入，面板窗口不注入。
+ *
+ * 用户看到的现象：小电视四周有一圈深色留白，上下两条尤其厚。
+ * 那一圈是**两层**底色叠出来的，少改一层就还是黑边：
+ *
+ *   1. 窗口层 —— main.js 里 transparent:false + backgroundColor:'#050a15'；
+ *   2. 页面层 —— tv/style.css 给 html/body 各刷了一层 #050a15，
+ *      body 还叠了径向渐变与扫描线。
+ *
+ * 这一条负责第 2 层。只抹 html/body 这两层底色，**画面本体一个像素都不动**：
+ * 电视柜（.tv-cabinet）、屏幕（#playerFrame）各有自己的不透明背景，
+ * 柜外的留白本来就只是这两层底色的颜色，去掉后直接透出桌面。
+ *
+ * 留白有多宽：视口 1120×736，.shell 只有 1088×579 并垂直居中 ——
+ * 左右各 16px，**上下各 78px**（× 缩放 0.46 后仍有 36 屏幕像素）。
+ * 这正是"上下黑边明显比左右厚"的原因，也是这一条主要解决的东西。
+ *
+ * 和 TV_DRAG_CSS 的关系：两条都进电视窗口、互相独立。拖动那条一个字都不许
+ * 带视觉属性（有断言盯着），所以透明度这种事必须另开一条，不能塞进去。
+ *
+ * 代价（已知，接受）：柜外的留白在 Windows 上**看不见但仍属于窗口**，
+ * 鼠标移到那圈"空气"上照样会被窗口接住 —— 点不到底下的桌面图标。
+ * 换掉它需要 setIgnoreMouseEvents + 逐个区域动态开关，收益不抵复杂度。 */
+const TV_TRANSPARENT_CSS = `
+  /* 页面自己刷的两层近黑底色。shorthand 连 background-image 一起清掉，
+   * 否则 body 那层径向渐变还在。 */
+  html, body { background: transparent !important; }
 `;
 
 /* 面板窗口专属注入。面板是"另一个 tv 实例"，但它不是用来直播的 ——
@@ -174,6 +204,6 @@ const panelBox = (key) => {
 
 module.exports = {
   VIEWPORT, TV_SIZES, PANEL_SIZES,
-  TV_DRAG_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS,
+  TV_DRAG_CSS, TV_TRANSPARENT_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS,
   zoomFor, panelBounds, panelBox,
 };

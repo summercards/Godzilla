@@ -1,7 +1,7 @@
 {
   "name": "godzilla-pet",
   "productName": "巨兽都市桌宠",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "巨兽都市桌面宠物：一个小电视，里面播哥斯拉自动拆城，进度存在文件里。",
   "main": "main.js",
   "private": true,

@@ -192,6 +192,39 @@ localStorage.setItem('gnn-kaiju-idle-v3', economy.serialize(Date.now(), worldSna
 画面本体保持可交互。这条注入里**没有任何视觉属性**，测试守着它
 （出现 `color` / `font` / `margin` 之类就直接失败）。
 
+### 电视柜以外透出桌面
+
+窗口里那圈留白**不是黑边，是桌面**。要做到这一点得同时改**两层**，少一层就还是黑的：
+
+| 层 | 在哪 | 怎么改 |
+| --- | --- | --- |
+| 窗口层 | `main.js` 电视窗口 | `transparent: true` + `backgroundColor: '#00000000'` |
+| 页面层 | `tv-config.js` 的 `TV_TRANSPARENT_CSS` | 把 `html, body` 那两层 `#050a15` 抹成 `transparent` |
+
+只改窗口层：页面自己刷的 `#050a15` 铺满整个视口，照样是黑的。
+只改页面层：窗口底板还在，一样黑。**两层都动才算数**，所以有断言各钉一层。
+
+留白有多厚，是版面算出来的（视口 1120×736，`.shell` 只有 1088×625 并垂直居中）：
+
+| 方向 | 视口里 | small 档（×0.4）实到屏幕 |
+| --- | --- | --- |
+| 左右 | 各 16px | 各 6.4px |
+| 上下 | 各 55px | **各 22px** |
+
+上下比左右厚三倍多 —— 这就是原来那圈黑边"上下明显更宽"的来源。
+
+三条边界：
+
+- **面板窗口故意不透明**，也不注入 `TV_TRANSPARENT_CSS`。它是一块摆在电视旁边的
+  菜单，字压在壁纸上只会更难读。断言数 `insertCSS(TV_TRANSPARENT_CSS)` 恰好一次。
+- **只碰 `html, body`**，不碰 `.tv-cabinet` / `#playerFrame` 这些画面本体 ——
+  一旦碰到，那就从"改窗口"变成"改产品定义"了。断言钉着选择器白名单。
+- **留白区域看不见但仍属于窗口**，鼠标移到那圈"空气"上照样被窗口接住。
+  换掉它要 `setIgnoreMouseEvents` + 逐区域动态开关，收益不抵复杂度，不换。
+
+至于柜子周围那圈**深浅渐变**（贴着圆角轮廓、越往外越淡），那是 `tv/style.css` 里
+电视柜自己的 `box-shadow`，属于画面的一部分，不是窗口底色。
+
 ## 控制按钮与观测面板
 
 电视窗口**外面**贴着一个 88px 的像素方块，那是全部功能的入口。点它，旁边会
@@ -234,6 +267,7 @@ dock-preload.js        那个按钮的桥，只报一句"用户点了"
 panel-preload.js       面板窗口的只读存档层 + 操作转发（绝不写盘）
 save-store.js          存档仓库：原子写、备份轮转、导出导入（不依赖 electron，可单独测）
 tv-config.js           档位与注入内容（主进程与开发工具共用同一份）
+                       拖动 / 透明 / 面板两条，共四条注入，各有契约测试
 CHANGELOG.md           版本改动与验证记录
 tv/                    被播放的画面：一份完整的挂机直播游戏，独立可跑，桌宠不改它
   index.html game.js progression.js rig.js appearance.js style.css
@@ -260,7 +294,7 @@ docs/
   怪物形态框架.md       怪物 → 形态 → 部件槽 → {样式, 颜色, 大小}
   资产规范.md           强制约束：目录、命名、贴图规格、三轴取值、反例
 tests/
-  tv.test.cjs          档位、注入、存档接管与面板的契约，16 项
+  tv.test.cjs          档位、注入、透明、存档接管与面板的契约，31 项
   save-store.test.cjs  存档持久化的契约，20 项
   app-bundle.test.cjs  应用包与启动器契约，8 项（仅 macOS 可跑，其余平台跳过）
 ```
@@ -396,6 +430,12 @@ tv-preload.js   const KEY  = 'gnn-kaiju-idle-v3'
   换一份画面版本时，`tests/tv.test.cjs` 会先报出来。
 - 打包成独立应用要用 `electron-builder` 之类的工具，本仓库的 `make-app.sh`
   生成的是 macOS 启动器，不是自包含的包。
+- 电视窗口的留白是透明的，但**那块地方仍然算窗口**：鼠标移到柜子外那圈"空气"上
+  会被窗口接住，点不到底下的桌面图标。要改得用 `setIgnoreMouseEvents`
+  加逐区域动态开关，本版不做。
+- 透明窗口在 macOS 上可能留下视觉残影（Electron 为此提供 `invalidateShadow()`）。
+  本项目会改窗口尺寸（`applySize`）与拖动位置，属于容易触发的情形。**未在
+  macOS 上实测**，记在 `docs/平台验证清单.md` 里。Windows 侧无此文档化条目。
 
 ## 许可
 

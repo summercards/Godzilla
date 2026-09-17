@@ -17,7 +17,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, dialog, nativeIm
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { TV_DRAG_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, PANEL_SIZES, zoomFor, panelBounds, panelBox } = require('./tv-config.js');
+const { TV_DRAG_CSS, TV_TRANSPARENT_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, PANEL_SIZES, zoomFor, panelBounds, panelBox } = require('./tv-config.js');
 const { createStore } = require('./save-store.js');
 const { createLogger } = require('./log-store.js');
 const { createSaveGuard } = require('./save-guard.js');
@@ -279,9 +279,15 @@ function createWindow() {
     height: size.h,
     x: pos.x,
     y: pos.y,
-    // 电视里要能点"强化 / 技能树"那些按钮，所以不能透明、也不能设成不抢焦点的 panel
-    transparent: false,
-    backgroundColor: '#050a15',
+    /* 电视柜以外必须透出桌面，不是一圈黑边。这需要**窗口与页面两层一起透明**：
+     * 窗口开 transparent 只是前提，页面自己给 html/body 刷的那两层底色还得由
+     * TV_TRANSPARENT_CSS 抹掉（见 tv-config.js）。
+     * backgroundColor 必须是全透明而不是 '#050a15' —— 半透明/不透明的底色会让
+     * 窗口创建瞬间先闪一块黑，而页面加载完又变得看见桌面。
+     * 拖动区仍然靠 TV_DRAG_CSS 的 -webkit-app-region，透明区域在 Windows 上
+     * 照常接鼠标事件，拖拽行为不变。 */
+    transparent: true,
+    backgroundColor: '#00000000',
     frame: false,
     hasShadow: false,
     resizable: false,
@@ -313,10 +319,13 @@ function createWindow() {
   w.loadFile(ORIGINAL_GAME);
 
   // 版面锚点：加载完成后把缩放系数定死，视口就恒等于原版的设计尺寸。
-  // 注入只补 frameless 窗口缺的拖动把手，不动任何呈现（见 tv-config.js）。
+  // 注入只补 frameless 窗口缺的拖动把手 + 抹掉页面自己的底色（见 tv-config.js）。
   w.webContents.on('did-finish-load', () => {
     w.webContents.setZoomFactor(zoomFor(size.w));
     w.webContents.insertCSS(TV_DRAG_CSS).catch(() => {});
+    /* 电视柜以外的留白透出桌面。**只在电视窗口注入** —— 面板是摆在旁边的
+     * 一块菜单，透出桌面只会让面板里的字压在壁纸上，更难读。 */
+    w.webContents.insertCSS(TV_TRANSPARENT_CSS).catch(() => {});
   });
   // 右键弹控制菜单：frameless 窗口没有标题栏，总得有个入口
   w.webContents.on('context-menu', () => popupControlMenu(w));
@@ -412,6 +421,9 @@ function openPanel(key = 'assign') {
     width: ps.w,
     height: ps.h,
     frame: false,
+    /* 面板**故意不透明**（与电视窗口相反，见 createWindow 里的 transparent）。
+     * 它是一块摆在电视旁边的菜单，字要压在纯色底上才读得清；
+     * 它的三个注入里也**没有** TV_TRANSPARENT_CSS。 */
     backgroundColor: '#050a15',
     hasShadow: false,
     resizable: false,

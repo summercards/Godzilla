@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
-const { VIEWPORT, TV_SIZES, TV_DRAG_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, zoomFor } = require('../tv-config.js');
+const { VIEWPORT, TV_SIZES, TV_DRAG_CSS, TV_TRANSPARENT_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, zoomFor } = require('../tv-config.js');
 
 test('副屏定位：优先右侧、左侧回退、上下回退且始终在工作区', () => {
   const { panelBounds } = require('../tv-config.js');
@@ -420,6 +420,65 @@ test('面板窗口：字与按钮必须放大一号，且只作用于面板', ()
   assert.ok(!PANEL_READABLE_CSS.includes('pixel-dock'), '放大规则不许染指 pixel-dock');
   assert.notEqual(PANEL_READABLE_CSS, PANEL_ONLY_CSS, '放大与"只留菜单"必须是两条独立常量');
 });
+
+/* ------------------------------------------------------------------ *
+ * 电视窗口四周必须是桌面，不是黑边
+ *
+ * 用户反馈的现象：小电视周围有一圈深色留白，上下两条明显比左右厚。
+ * 成因是**两层**底色叠出来的：
+ *
+ *   1. 窗口层：main.js 原先 transparent:false + backgroundColor:'#050a15'；
+ *   2. 页面层：tv/style.css 给 html/body 各刷了一层 #050a15，
+ *      body 还叠了径向渐变。
+ *
+ * 留白的厚度来自版面：视口 1120×736，.shell 只有 1088×579 且垂直居中，
+ * 于是左右各 16px、**上下各 78px**（缩放 0.46 后仍有 36 屏幕像素）——
+ * 这正对应用户看到的那两条厚黑边。
+ *
+ * 少改一层就还是黑边：窗口透明而页面不透明，页面底色照样铺满；
+ * 页面透明而窗口不透明，窗口底色照样在。所以下面三条各自钉一层。
+ *
+ * 变异测试：把 main.js 的 transparent 改回 false，或删掉 createWindow 里
+ * 那句 insertCSS(TV_TRANSPARENT_CSS)，或把这句挪进面板窗口，三者任一
+ * 都必须让这条断言变红。
+ * ------------------------------------------------------------------ */
+test('电视窗口：窗口层与页面层都必须透明，否则四周还是黑边', () => {
+  const main = readMain();
+
+  // ① 窗口层
+  assert.match(main, /transparent:\s*true/, '电视窗口没开透明，四周会是窗口底色（黑边的一半）');
+  assert.ok(!/transparent:\s*false/.test(main), '还有窗口写着 transparent:false');
+  assert.match(main, /backgroundColor:\s*'#00000000'/,
+    '窗口底色不是全透明 —— transparent:true 时窗口创建瞬间会先闪一块黑');
+
+  // ② 页面层：只准抹 html/body 这两层底色，不许碰画面本体
+  assert.ok(typeof TV_TRANSPARENT_CSS === 'string' && TV_TRANSPARENT_CSS.length > 0,
+    'TV_TRANSPARENT_CSS 没有被导出');
+  assert.match(TV_TRANSPARENT_CSS, /html\s*,\s*body\s*\{[^}]*background:\s*transparent\s*!important/,
+    '页面那层 #050a15 没被抹掉（shorthand 必须带 !important 才压得过 tv/style.css）');
+  const rules = TV_TRANSPARENT_CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/\.shell|\.tv-cabinet|#playerFrame|#stage|\.broadcast/.test(rules),
+    '透明注入越过 html/body 去动画面本体了 —— 那属于改产品定义，不是改窗口');
+
+  // ③ 注入范围：面板窗口必须仍然不透明
+  /* 断言钉的是"哪里调了 insertCSS"，不是"全文有没有出现过这个名字" ——
+   * 面板那段注释里正当地提到了它（说明"这里故意没有注入"），
+   * 扫关键字会把那句说明当成违规证据。同 TV_HIDE_DOCK_CSS 那条的处理方式。 */
+  const injects = main.match(/insertCSS\(\s*TV_TRANSPARENT_CSS\s*\)/g) || [];
+  assert.equal(injects.length, 1, `透明注入应当恰好注入一次（电视窗口），现在有 ${injects.length} 次`);
+
+  const start = main.indexOf('panelWin = new BrowserWindow');
+  assert.ok(start > 0, '在 main.js 里找不到面板窗口的创建处');
+  const panelBlock = main.slice(start, main.indexOf("panelWin.on('closed'", start));
+  assert.ok(!/insertCSS\(\s*TV_TRANSPARENT_CSS/.test(panelBlock),
+    '透明注入泄漏到面板窗口 —— 面板是一块菜单，透出桌面只会更难看');
+  assert.match(panelBlock, /backgroundColor:\s*'#050a15'/,
+    '面板窗口的底色被一起改掉了（面板故意不透明）');
+  // 电视那条注入不许并进拖动 CSS：拖动 CSS 有"零视觉属性"的单独断言
+  assert.ok(!/transparent/.test(TV_DRAG_CSS.replace(/\/\*[\s\S]*?\*\//g, '')),
+    'TV_DRAG_CSS 里混进了透明相关规则，两条注入必须独立');
+});
+
 
 test('存档接管：preload 盯着的键必须与画面里的 SAVE 常量一致', () => {
   const gameKey = readGame().match(/SAVE\s*=\s*'([^']+)'/);
