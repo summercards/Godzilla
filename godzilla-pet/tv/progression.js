@@ -127,13 +127,15 @@ const CATEGORY_SHARE = { stat: 55, part: 30, element: 12, trait: 3 };
 
 const MUTATIONS = [
   /* 属性突变 —— 四项强化的等效免费加成 */
-  { id: 'm_power', name: '力量增生', cat: 'stat', rarity: 'common', desc: '力量 +1 级', apply: (d) => { d.levels.power += 1; } },
-  { id: 'm_atomic', name: '炉心膨胀', cat: 'stat', rarity: 'common', desc: '炉心 +1 级', apply: (d) => { d.levels.atomic += 1; } },
-  { id: 'm_metab', name: '代谢加速', cat: 'stat', rarity: 'common', desc: '代谢 +1 级', apply: (d) => { d.levels.metabolism += 1; } },
-  { id: 'm_stride', name: '步幅拓宽', cat: 'stat', rarity: 'common', desc: '动能 +1 级', apply: (d) => { d.levels.stride += 1; } },
-  { id: 'm_twin', name: '双生强化', cat: 'stat', rarity: 'fine', desc: '随机两项强化各 +1', apply: (d, rng) => { const ks = Object.keys(d.levels); const a = ks[Math.floor(rng() * ks.length)]; let b = a; while (b === a) b = ks[Math.floor(rng() * ks.length)]; d.levels[a] += 1; d.levels[b] += 1; } },
-  { id: 'm_surge', name: '核能过载', cat: 'stat', rarity: 'rare', desc: '四项强化各 +1', apply: (d) => { for (const k in d.levels) d.levels[k] += 1; } },
-  { id: 'm_apex', name: '巅峰体质', cat: 'stat', rarity: 'epic', desc: '四项强化各 +2', apply: (d) => { for (const k in d.levels) d.levels[k] += 2; } },
+  // 属性等级只允许由核能强化或 assign 加点改变。突变只改变外观、元素和倍率，
+  // 避免玩家未加点时 levels 自己增长。
+  { id: 'm_power', name: '力量增生', cat: 'stat', rarity: 'common', desc: '破坏倍率 +4%', apply: (d) => { d.morph.dmgBoost = (d.morph.dmgBoost || 0) + 0.04; } },
+  { id: 'm_atomic', name: '炉心膨胀', cat: 'stat', rarity: 'common', desc: '吐息倍率 +4%', apply: (d) => { d.morph.beamBoost = (d.morph.beamBoost || 0) + 0.04; } },
+  { id: 'm_metab', name: '代谢加速', cat: 'stat', rarity: 'common', desc: '收益倍率 +4%', apply: (d) => { d.morph.energyBoost = (d.morph.energyBoost || 0) + 0.04; } },
+  { id: 'm_stride', name: '步幅拓宽', cat: 'stat', rarity: 'common', desc: '速度倍率 +4%', apply: (d) => { d.morph.speedBoost = (d.morph.speedBoost || 0) + 0.04; } },
+  { id: 'm_twin', name: '双生强化', cat: 'stat', rarity: 'fine', desc: '随机两项战斗倍率各 +3%', apply: (d, rng) => { const ks = ['dmgBoost', 'beamBoost', 'energyBoost', 'speedBoost']; const a = ks[Math.floor(rng() * ks.length)]; let b = a; while (b === a) b = ks[Math.floor(rng() * ks.length)]; d.morph[a] = (d.morph[a] || 0) + 0.03; d.morph[b] = (d.morph[b] || 0) + 0.03; } },
+  { id: 'm_surge', name: '核能过载', cat: 'stat', rarity: 'rare', desc: '四项战斗倍率各 +3%', apply: (d) => { for (const k of ['dmgBoost', 'beamBoost', 'energyBoost', 'speedBoost']) d.morph[k] = (d.morph[k] || 0) + 0.03; } },
+  { id: 'm_apex', name: '巅峰体质', cat: 'stat', rarity: 'epic', desc: '四项战斗倍率各 +6%', apply: (d) => { for (const k of ['dmgBoost', 'beamBoost', 'energyBoost', 'speedBoost']) d.morph[k] = (d.morph[k] || 0) + 0.06; } },
 
   /* 部位突变 —— 绑定一个骨骼部件，同时给数值和外观 */
   { id: 'p_spike1', name: '脊刺增生', cat: 'part', part: 'spikes', rarity: 'common', desc: '背刺 +2 根，重踏范围 +5%', apply: (d) => { d.morph.spikes += 2; d.morph.stompBoost = (d.morph.stompBoost || 0) + 0.05; } },
@@ -619,16 +621,15 @@ class Economy {
   autoSpend() {
     const d = this.data;
     if (d.auto) {
-      for (let i = 0; i < 4; i++) { if (!this.upgrade(this.chooseUpgrade())) break; }
+      // 托管只负责技能树，不得偷偷替玩家提升四项属性。
+      // 属性的唯一增长来源是升级发放的 assign，以及玩家主动加点。
       const policy = d.policy;
       const choices = SKILLS.filter((s) => !this.has(s.id) && (!s.requires || this.has(s.requires)))
         .sort((a, b) => (policy === a.branch ? -10 : 0) + a.cost - ((policy === b.branch ? -10 : 0) + b.cost));
       for (const s of choices) if (this.unlock(s.id)) break;
     }
-    // 加点机会不自动花：那是留给玩家"回来点一下"的仪式感，也是面板角标
-    // 把他拉回来的理由。但进化机会是纯被动收益、不打断观看，自动掷掉 ——
-    // 这是"玩家不点也能一直前进"的保证，但会累积的加点机会仍会留着当角标。
-    if (d.auto && d.evoRolls > 0) while (d.evoRolls > 0) this.rollEvolution();
+    // 加点机会与进化机会都保留给玩家。升级后必须看得见余额增加，不能在
+    // 下一次托管 tick 里被自动消费；随机突变也不能成为属性暗增入口。
   }
 
   tick(dt) {
