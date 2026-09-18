@@ -1029,9 +1029,25 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   /* 渲染进程真的死掉（不是卡住）比 unresponsive 严重：画面没了，
-   * 存档也不再更新，玩家看到的是一块不动的电视。 */
-  app.on('render-process-gone', (_e, _webContents, details) => {
+   * 存档也不再更新，玩家看到的是一块不动的电视。
+   *
+   * ⚠️ 光记日志不够，**必须重建**。原先这里只记一条日志，于是窗口会永久白板：
+   * 面板的渲染进程一死，panelWin 这个对象还在，openPanel() 发现它没被销毁
+   * 就只 send('panel:select') + show()，叫回来的永远是一块白板；托盘里也
+   * 没有"关闭面板"这一项，玩家只剩重启桌宠一条路。2026-09-18 实测过这个状态。
+   *
+   * 只重建一次：同一个 contents 再崩就放弃，别让确定性崩溃变成后台死循环重载，
+   * 那比一块白板更糟。reload() 本身是安全的 —— 画面的一切进度都在存档里，
+   * 重新认档走的是同一条 tv:saveBoot 握手（见 README 的存档接管章节）。 */
+  const revived = new WeakSet();
+  app.on('render-process-gone', (_e, contents, details) => {
     logError('渲染进程退出', { reason: details && details.reason, exitCode: details && details.exitCode });
+    // clean-exit 是正常关闭（窗口正在走销毁流程），复活它会把要关的窗口拽回来
+    if (!contents || contents.isDestroyed() || (details && details.reason === 'clean-exit')) return;
+    if (revived.has(contents)) { logError('渲染进程再次退出，不再重建', { reason: details && details.reason }); return; }
+    revived.add(contents);
+    logWarn('正在重建渲染进程');
+    contents.reload();
   });
   app.on('child-process-gone', (_e, details) => {
     logError('子进程退出', {

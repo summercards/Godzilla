@@ -44,8 +44,15 @@ contextBridge.exposeInMainWorld('__tvBridge', {
   info: () => ({ installed: true, readOnly: true, hasData: mem !== null, key: selected }),
 });
 
-// 入口、Tab、closePanel、evoSpeed 都是本地导航，不转发。
-const FORWARD = /^(assign|talent|buy|up|skill|roll|auto|policy|sound)[-\w]*$/;
+/* 入口、Tab、closePanel、evoSpeed 都是本地导航，不转发。
+ *
+ * ⚠️ 这份白名单必须与 tv/game.js 里 panelCommand() 的 valid 正则**保持同一集合**：
+ * 电视那边只执行白名单里的 id，面板这边只转发白名单里的 id，两张表任一少一项，
+ * 那个按钮就会变成"点了没反应"——而且两端都不报错。
+ * 2026-09-18 就是这么丢掉 nextMap 的：电视侧认它、面板侧不转发，
+ * 「进入下一张地图」点了没有任何反馈，推图永久停在第一章。
+ * 现在由 tests/tv.test.cjs 从 game.js 反推清单逐个断言，加操作只加一边会红。 */
+const FORWARD = /^(assign|talent|buy|up|skill|roll|auto|policy|sound|nextMap)[-\w]*$/;
 function forward(payload) {
   if (payload.id.startsWith('open-') || payload.id.endsWith('Tab') || ['closePanel', 'evoSpeed'].includes(payload.id) || !FORWARD.test(payload.id)) return;
   ipcRenderer.send('panel:tap', payload);

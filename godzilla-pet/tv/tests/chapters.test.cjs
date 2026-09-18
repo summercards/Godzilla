@@ -122,13 +122,89 @@ test('三城拥有不同天空时段与天气表现，且天气绘制读取章�
   assert.equal(new Set(signatures).size, 3);
 });
 
-test('路线条位于画布上方，五节点、当前进度和下一区文本真实绘制', () => {
-  const r=P.routeFor(5,.5),texts=[],rects=[];
-  const env={currentRoute:()=>r,ctx:{save(){},restore(){}},rect:(...args)=>rects.push(args),text:(...args)=>texts.push(args)};
-  vm.runInNewContext(functionSource('drawCampaignRoute','render')+';drawCampaignRoute();',env);
-  assert.equal(rects.filter(a=>a[2]===14&&a[3]===14).length,5);
-  assert(rects.some(a=>a[2]===258&&a[3]===4),'当前区进度按 50% 绘制');
-  assert(texts.some(a=>a[0].includes('东京')));assert(texts.some(a=>a[0].includes('浅草')));
-  assert(texts.some(a=>a[0].includes('50%')));
-  assert(rects.every(a=>a[1]+a[3]<=78),'路线条不能覆盖怪兽活动区');
+/* 路线条：轨道与 5 个节点必须**画在同一条线**上，填充的起点必须跟着当前节点走。
+ *
+ * 改前这条轨道是坏的，三种表现同一个根因（2026-09-18 主人报的"进度条不在正确的
+ * 节点里、推图指示不亮、一直停在第一章"）：
+ *   · 进度条另画在 y=65，和节点（y=44）不是一条线；
+ *   · 填充宽度 (w+16)*progress 不含当前节点序号 —— 站在第 2 个区、本区推进 0%
+ *     时条子也从最左边铺开；
+ *   · 节点之间的连线只在 i<index 时变绿，**正在推进的那一段永远是暗的**。
+ * 下面每一条都对着其中一个，回退任何一个都会红。 */
+test('路线条与节点同线，填充跟着当前节点走，章末出口在最后一个区接管', () => {
+  const draw = (district, progress, gate) => {
+    const r = P.routeFor(district, progress), texts = [], rects = [];
+    const env = { currentRoute: () => r, mapGate: gate, ctx: { save() {}, restore() {} },
+      rect: (...a) => rects.push(a), text: (...a) => texts.push(a) };
+    vm.runInNewContext(functionSource('drawCampaignRoute', 'render') + ';drawCampaignRoute();', env);
+    // 轨道各段统一高 3（改前那条是 4），节点方块 14×14，开闸红圈 20×20
+    return { r, texts, rects, nodes: rects.filter(a => a[2] === 14 && a[3] === 14), track: rects.filter(a => a[3] <= 4) };
+  };
+
+  const mid = draw(2, .5, null);           // 第 2 区（index 1），本区推进 50%
+  assert.equal(mid.nodes.length, 5);
+  assert.equal(mid.r.index, 1);
+
+  // ① 同一条线：轨道必须落在节点方块的高度范围内
+  const top = mid.nodes[0][1], bottom = top + mid.nodes[0][3];
+  for (const a of mid.track) assert.ok(a[1] >= top && a[1] + a[3] <= bottom,
+    `轨道 y=${a[1]}..${a[1] + a[3]} 跑到节点行（${top}..${bottom}）外面去了`);
+
+  // ② 填充起点跟着当前节点，不是整个轨道的最左边
+  const fill = mid.track.find(a => a[0] === 262 + 1 * 125 + 8 && a[4] === mid.r.street.color);
+  assert.ok(fill, '本区推进的填充没有从当前节点（第 2 个）之后开始');
+  assert.ok(Math.abs(fill[2] - 109 * .5) < 1e-9, '填充长度不是 step−2×gap 的 50%');
+
+  // ③ 正在推进的那一段不是暗的，未到的段才是
+  assert.equal(mid.track.filter(a => a[4] === '#70e7b0').length, mid.r.index, '只有走过的段是绿的');
+
+  const last = draw(5, .5, null);          // 第 5 区（index 4），本章最后一个节点
+  assert.ok(last.track.some(a => a[0] === 762 && a[2] === 40), '最后一个区没有通往下一章的出口');
+  const exit = last.track.find(a => a[0] === 770 && a[4] === last.r.street.color);
+  assert.ok(exit && Math.abs(exit[2] - 20) < 1e-9, '最后一个区的推进度必须填在章末出口里');
+  assert.ok(last.texts.some(a => a[0] === '下一章 · 东京'), '跨章时右栏没有点名第二章');
+  assert.ok(last.texts.some(a => a[0] === '下一城区 · 浅草灯笼街'));
+  assert.ok(last.texts.some(a => a[0].includes('50%')));
+  assert.ok(draw(2, .3, null).texts.some(a => a[0] === '本章 · 大阪'), '章内推进不该点名别的章');
+
+  // ④ 已开闸：当前节点套红圈、右栏转红；未开闸一个红圈都不许有
+  const ring = (d) => d.rects.filter(a => a[2] === 20 && a[3] === 20);
+  const gated = draw(5, 1, { district: 6 });
+  assert.equal(ring(gated).length, 1, '已开闸时当前节点要套一圈红');
+  assert.equal(ring(gated)[0][4], '#ff7780');
+  assert.ok(gated.texts.some(a => a[0] === '下一章 · 东京' && a[4] === '#ff7780'), '跨章且已开闸时右栏要转红');
+  assert.equal(ring(last).length, 0, '未开闸不许出现红圈');
+  // 红色只留给真的跨章：同章内开闸也变红的话，"可以切场景"这个信号就被稀释了
+  assert.ok(draw(2, 1, { district: 3 }).texts.every(a => a[4] !== '#ff7780'),
+    '同章内开闸不该出现跨章红');
+
+  assert.ok(mid.rects.every(a => a[1] + a[3] <= 78), '路线条不能覆盖怪兽活动区');
+});
+
+/* 关卡前进按钮的文案。
+ *
+ * 改前是 `'进入 ' + 下一区所在章的标题`：站在大阪的第 1–4 区时按钮写着
+ * "进入 第一章 · 大阪" —— 和"我已经在大阪"自相矛盾，玩家读到的就是"推图卡住了"。
+ * 现在跨章才点名章节，章内点名下一区街道。 */
+test('关卡前进按钮文案：章内点名下一区街道，跨章才点名章节', () => {
+  const fn = functionSource('nextMapLabel', 'announceMapGate');
+  assert.ok(fn.includes('nextMapLabel'), 'game.js 里找不到 nextMapLabel');
+  const label = (target, from) => vm.runInNewContext(fn + ';nextMapLabel(' + target + ',' + from + ')', { P });
+
+  assert.equal(label(2, 1), '进入 通天阁商店街');
+  assert.equal(label(3, 2), '进入 道顿堀灯街');
+  assert.equal(label(5, 4), '进入 大阪港仓库街');
+  assert.equal(label(6, 5), '进入第二章-东京');
+  assert.equal(label(11, 10), '进入第三章-纽约');
+  // 纽约每五区续轮：16 区仍是纽约，所以只报街区名，绝不报出一个"第四章"
+  assert.equal(label(16, 15), '进入 布鲁克林桥街');
+  assert.ok(!label(16, 15).includes('第四'), '纽约续轮不许凭空造出第四章');
+
+  // 同章内的每一档都必须正好是下一区的街区名 —— 一个章号都不许出现
+  for (let d = 1; d <= 15; d++) {
+    const to = P.chapterFor(d + 1);
+    if (to.key !== P.chapterFor(d).key) continue;
+    assert.equal(label(d + 1, d), '进入 ' + to.districts[d % 5].name,
+      `第 ${d} 区推进时按钮报出了所在章的名字，和"我已经在这一章"自相矛盾`);
+  }
 });

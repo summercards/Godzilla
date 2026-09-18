@@ -91,12 +91,22 @@ button:disabled{cursor:default}h1,h2,h3,h4,p{font-weight:400;margin:0}
 .ticker-clip{flex:1;overflow:hidden;white-space:nowrap}.ticker-track{display:inline-block;white-space:nowrap;will-change:transform}
 .ticker-track>span{display:inline-block;padding-right:60px;font-size:clamp(9px,1.05cqw,15px);color:#cdd8e6;letter-spacing:1px}
 .ticker-time{color:#9fb6c8;padding:0 12px;font-size:clamp(8px,1cqw,13px)}
+/* 换到其它台时，节目画面是完整独立的电视信号：不叠加主直播的机位、新闻条和字幕。 */
+.broadcast.channel-active .camera-top,.broadcast.channel-active .inset,.broadcast.channel-active .action-caption,.broadcast.channel-active .event-banner,.broadcast.channel-active .lower-third,.broadcast.channel-active .ticker{display:none}
+.broadcast.channel-active #channel{z-index:6}.broadcast.channel-active .scanlines{z-index:7}
 
 /* ===== 观测面板：加点 / 天赋 / 进化 ===== */
 .management-screen{position:absolute;inset:0;z-index:6;background:#0a1528f2;overflow:auto;padding:2.2%}
 .obs-title{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;border-bottom:3px solid #45617b;padding-bottom:8px}
 .section-kicker{display:block;color:#7fb9cf;font-size:12px;letter-spacing:3px}.obs-title h2{font-size:24px;color:#fff;margin-top:3px}
-.obs-tools{display:flex;align-items:center;gap:12px}.obs-tools>span{color:#8fb9cf;font-size:13px;display:flex;align-items:center;gap:6px}.next-map-button{min-width:190px;padding:12px 18px;font-size:16px;font-weight:700;border:3px solid #43739b}.next-map-button.ready{background:#c3313d;border-color:#ff7780;color:#fff;box-shadow:4px 4px 0 #531822;animation:next-map-pulse 1.2s steps(2,end) infinite}.next-map-button.ready:hover{background:#e04450;border-color:#ffb0b4}.next-map-button:disabled{opacity:.42;cursor:not-allowed}@keyframes next-map-pulse{50%{filter:brightness(1.25)}}
+.obs-tools{display:flex;align-items:center;gap:12px}.obs-tools>span{color:#8fb9cf;font-size:13px;display:flex;align-items:center;gap:6px}.next-map-button{min-width:190px;padding:12px 18px;font-size:16px;font-weight:700;border:3px solid #43739b}
+/* 两态：未达成灰色、达成（可以切场景）红色。
+ * 灰色必须用底色压出来，不能只靠 opacity —— 桌宠背后是桌面，
+ * 半透明的蓝底按钮看着"还能点"，玩家会一直点它却拿不到任何反馈。 */
+.next-map-button.ready{background:#c3313d;border-color:#ff7780;color:#fff;box-shadow:4px 4px 0 #531822;animation:next-map-pulse 1.2s steps(2,end) infinite}
+.next-map-button.ready:hover{background:#e04450;border-color:#ffb0b4}
+.next-map-button:disabled{background:#232e3d;border-color:#3f4c5b;color:#7b8794;opacity:1;cursor:not-allowed;box-shadow:none;animation:none;text-shadow:none}
+@keyframes next-map-pulse{50%{filter:brightness(1.25)}}
 .obs-tools>span i{width:9px;height:9px;border-radius:50%;background:#46e08a;box-shadow:0 0 7px #46e08a}
 .metric-row{display:grid;grid-template-columns:repeat(4,1fr);border:3px solid #2f5f7a;background:#0c1c33;margin-bottom:12px}
 .metric-row>div{padding:10px 14px;border-right:3px solid #1d3550;position:relative}

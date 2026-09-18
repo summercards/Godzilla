@@ -386,10 +386,84 @@ test('面板窗口：只转发游戏操作，切页与关窗留在面板本地',
   assert.ok(fwd, '找不到转发白名单 FORWARD');
   assert.ok(!/fullscreen|dismiss/.test(fwd[1]), '白名单里混进了全屏/离线提示');
 
-  // 白名单必须仍然覆盖真正的游戏操作
-  for (const p of ['assign', 'talent', 'buy', 'up', 'skill', 'roll']) {
-    assert.ok(fwd[1].includes(p), `白名单缺了 ${p} 前缀的操作`);
+  // 面板自己的本地操作一律不许转发（resetSave 走 invoke，另两个在面板本地执行）
+  assert.ok(!loadForward().test('resetSave'), '重置存档是面板自己的通道，不该转发');
+});
+
+/* 面板与电视两侧各有一份操作白名单，两边必须**同一集合**：
+ * 电视侧 panelCommand() 的 valid 正则决定执行什么，面板侧 panel-preload.js 的
+ * FORWARD 决定转发什么。任一侧少一项，那个按钮就是"点了没反应"，两端都不报错。
+ *
+ * 2026-09-18 的实际事故：nextMap 只加在 game.js 一侧，面板不转发 ——
+ * 「进入下一张地图」点了永远没有反馈，推图卡死在第一章，日志里一个字都不留。
+ *
+ * 所以这里不手写 id 清单（手写清单正是漏掉 nextMap 的原因），而是从 game.js 的
+ * 白名单源文里反推它能接受的 id，再逐个拿面板的**真正则**试一遍。
+ * 以后往 game.js 加操作、忘了同步面板，这条会红。 */
+function loadForward() {
+  const m = readPanel().match(/const\s+FORWARD\s*=\s*(\/.*?\/[a-z]*)/);
+  assert.ok(m, '在 panel-preload.js 里找不到 FORWARD 正则');
+  return eval(m[1]);   // eslint-disable-line no-eval —— 只求拿到那份真正则
+}
+
+/* 顶层按 | 切，但括号里的 | 不算：assign-(power|atomic|metabolism|stride)
+ * 必须当成一个分支，否则会被切成三条残缺的碎片，断言就永远绿了。 */
+function topLevelAlternatives(src) {
+  const out = [];
+  let depth = 0, cur = '';
+  for (const ch of src) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (ch === '|' && depth === 0) { out.push(cur); cur = ''; continue; }
+    cur += ch;
   }
+  out.push(cur);
+  return out;
+}
+
+function gameCommandIds() {
+  const src = readGame();
+  const m = src.match(/const\s+valid\s*=\s*\/\^\(([\s\S]*?)\)\$\//);
+  assert.ok(m, '在 tv/game.js 里找不到 panelCommand 的 valid 白名单');
+  const ids = [];
+  for (const branch of topLevelAlternatives(m[1])) {
+    const group = branch.match(/^([\w-]+)\(([^)]*)\)$/);
+    if (group) for (const one of group[2].split('|')) ids.push(group[1] + one);
+    else ids.push(branch);
+  }
+  const P = require('../tv/progression.js');
+  for (const n of P.TALENT_NODES) ids.push('talent-' + n.id);
+  for (const s of P.SKILLS) ids.push('skill-' + s.id);
+  return ids;
+}
+
+test('面板窗口：两侧白名单必须同一集合，加在一边等于没加', () => {
+  // 仓库里的 js 是 CRLF，正则里必须写成 \r?\n，否则这条断言会"找不到表达式"而误报
+  const expr = readGame().match(/const\s+valid\s*=\s*([\s\S]*?);\r?\n/);
+  assert.ok(expr, '在 tv/game.js 里找不到 panelCommand 的 valid 表达式');
+  const P = require('../tv/progression.js');
+  const accepts = (id) => new Function('id', 'P', 'return (' + expr[1] + ')')(id, P);
+  const forward = loadForward();
+
+  const ids = gameCommandIds();
+  assert.ok(ids.length >= 15, `反推出来的操作只有 ${ids.length} 个，正则大概解析错了`);
+
+  for (const id of ids) {
+    // 先自检：反推出来的必须真的是电视侧认的 id，否则下面的断言是空转
+    assert.ok(accepts(id), `反推出来的 ${id} 其实不在 game.js 的白名单里，正则解析错了`);
+    assert.ok(forward.test(id), `面板不转发 ${id} —— 电视侧认它，面板点了却没有任何反应`);
+  }
+
+  // 反向：白名单里的每个前缀都得真有用它的人，否则是只增不减的死条目
+  for (const alt of loadForward().source.match(/\(([^)]*)\)/)[1].split('|')) {
+    assert.ok(ids.some((id) => id.startsWith(alt)), `转发白名单里的 ${alt} 没有任何对应操作，已失效`);
+  }
+
+  /* 自检：这条断言必须有牙。把 2026-09-18 那版（漏掉 nextMap）的白名单拿来跑一遍，
+   * 它必须被抓住 —— 抓不住就说明上面那圈 for 是空转，绿了也不代表任何事。 */
+  const historical = /^(assign|talent|buy|up|skill|roll|auto|policy|sound)[-\w]*$/;
+  assert.ok(ids.some((id) => !historical.test(id)),
+    '连漏掉 nextMap 的那版白名单都能全过，这条断言没有牙齿');
 });
 
 /* 面板注入只在面板窗口生效。它藏掉直播包装、让面板铺满窗口 ——

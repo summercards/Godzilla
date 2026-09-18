@@ -49,7 +49,7 @@ function sendPanelCommand(payload){
   if(window.__panelHost)return window.__panelHost.command(payload);
   try{const result=window.opener?.__growth?.command(payload);if(result)playDiceRoll(result);}catch{}
 }
-let mode='playing',time=0,last=0,camera=0,shake=0,flash=0,hitFlash=0,lightning=0,nextLightning=2.5,bolt=[],elapsed=0,zoom=1,slow=0,particles=[],rings=[],floaters=[],fires=[],bullets=[],buildings=[],enemies=[],wrecks=[],beam=null,arcs=[],news=[],saveTimer=0,uiTimer=0,headlineTimer=0,breakingCd=0,lowerThirdTimer=0,bannerTimer=0,noticeTimer=0,hiddenAt=0,spawnTimer=7,actionSequence=0,beamCount=0,crashCount=0,channel='live',sceneZoom=1.3;
+let mode='playing',time=0,last=0,camera=0,shake=0,flash=0,hitFlash=0,lightning=0,nextLightning=2.5,bolt=[],elapsed=0,zoom=1,slow=0,particles=[],rings=[],floaters=[],fires=[],bullets=[],buildings=[],enemies=[],wrecks=[],beam=null,arcs=[],news=[],saveTimer=0,uiTimer=0,headlineTimer=0,breakingCd=0,lowerThirdTimer=0,bannerTimer=0,noticeTimer=0,hiddenAt=0,spawnTimer=7,actionSequence=0,beamCount=0,crashCount=0,channel='live',channelNoise=0,channelFlash=0,sceneZoom=1.3;
 let tickerOffset=0,tickerWidth=1200,headlineOffset=0,headlineWidth=600,headlineViewport=500,pendingTicker='',panelOpener=null;
 let p={x:420,ground:G,dir:1,step:0,moving:false,angle:.12,action:{name:'walk',t:0},cooldowns:{beam:18,stomp:7,roar:19,tail:10},recoil:0,stagger:0};
 const STAGES=P.STAGES;
@@ -66,9 +66,19 @@ let mapStartCleared=Number.isFinite(data.world?.mapStartCleared)?data.world.mapS
 let mapStartKills=Number.isFinite(data.world?.mapStartKills)?data.world.mapStartKills:data.kills;
 const CHUNK_SPAN=3400;
 let worldChunk=0;
+/* 「进入下一张地图」按钮的文案，只此一处。
+ *
+ * 老实现把 '进入 '+章标题 分别写在 announceMapGate 和 hud 两处，于是站在大阪
+ * 的第 2 个区时按钮写着"进入 第一章 · 大阪" —— 和"我已经在大阪"自相矛盾，
+ * 玩家读到的就是"推图卡在第一章"。跨章才点名章节，章内点名下一区的街道。 */
+function nextMapLabel(target,from){
+  const to=P.chapterFor(target),cur=P.chapterFor(from);
+  return to.key===cur.key?'进入 '+to.districts[(target-1)%5].name:'进入'+to.title.replace(' · ','-');
+}
+/* 闸门打开只声明状态，按钮长什么样交给 hud() —— 两处各写一份文案正是上面那个 bug 的成因。 */
 function announceMapGate(){
   if(!mapGate)mapGate={district:data.district+1};
-  const next=$('nextMap');if(next){next.disabled=false;next.classList.add('ready');next.textContent='进入 '+P.chapterFor(mapGate.district).title;}
+  hud();
 }
 function appendWorldChunk(){
   // 每块独立播种：只重建存档附近的块，也能还原同一栋楼的尺寸与外观。
@@ -409,32 +419,60 @@ function drawWeather(){
   ctx.globalAlpha=1;
 }
 function drawCampaignRoute(){
-  const r=currentRoute(),x0=262,y=44,w=500,step=w/4;
+  const r=currentRoute(),ready=!!mapGate,x0=262,y=44,w=500,step=w/4,gap=8,inner=step-gap*2,exitLen=40;
   ctx.save();rect(x0-20,8,800,70,'#071225e8');
   text(r.chapter.title+' / '+r.street.name+' · 第'+r.round+'轮',x0-8,25,14,r.street.color);
-  for(let i=0;i<5;i++){const x=x0+i*step,done=i<r.index,current=i===r.index;if(i<4)rect(x+8,y-1,step-16,2,done?'#70e7b0':'#30445b');rect(x-7,y-7,14,14,done?'#70e7b0':current?r.street.color:'#4b6075');text(String(r.nodes[i].district),x+14,y+4,10,current?'#fff3c4':'#94a9bd');}
-  rect(x0-8,65,w+16,4,'#30445b');if(r.progress>0)rect(x0-8,65,(w+16)*r.progress,4,r.street.color);
-  text('下一城区 · '+r.nextChapter.name,x0+w+48,27,12,'#b6cadc');
-  text(r.nextStreet.name,x0+w+48,45,12,r.nextStreet.color);
-  text('路段推进 '+Math.floor(r.progress*100)+'%',x0+w+48,69,12,'#b6cadc');ctx.restore();
+  /* 推图轨道与 5 个节点**画在同一条线**上（y=44），节点方块压在轨道上。
+   *
+   * 老实现把进度条单独画在 y=65：既不和节点同一条线，填充宽度 (w+16)*progress
+   * 也完全不含当前节点序号 —— 站在第 2 个区、本区推进 0% 时条子照样从最左边
+   * 一路铺开，看着像"快到章末了"；而节点之间那段连线只在 i<index 时变绿，
+   * **正在推进的那一段永远是暗的**，所以"推图指示不会亮"。
+   *
+   * 现在的口径：走过的段绿、当前段按本区推进度填街道色、未到的段暗。
+   * 本区推进度就是突破闸门的进度（12 栋建筑 / 8 个敌军，见 mapProgress()）。
+   * 本章最后一个区（index 4）没有"下一段"，进度改填右侧那段「本章出口」。 */
+  rect(x0,y-1,w,3,'#30445b');
+  if(r.index===4)rect(x0+w,y-1,exitLen,3,'#30445b');
+  for(let i=0;i<r.index&&i<4;i++)rect(x0+i*step+gap,y-1,inner,3,'#70e7b0');
+  const fill=(r.index<4?inner:exitLen)*r.progress;
+  if(fill>0)rect(x0+r.index*step+gap,y-1,fill,3,r.street.color);
+  for(let i=0;i<5;i++){const x=x0+i*step,done=i<r.index,current=i===r.index;
+    /* 闸门已开 = 可以进入下一城区，当前节点套一圈红框 —— 与按钮的红是同一个含义。 */
+    if(current&&ready)rect(x-10,y-10,20,20,'#ff7780');
+    rect(x-7,y-7,14,14,done?'#70e7b0':current?r.street.color:'#4b6075');
+    text(String(r.nodes[i].district),x+14,y+4,10,current?'#fff3c4':'#94a9bd');}
+  /* 右栏说清"下一个区落在哪一章"。老实现写的是 '下一城区 · '+章名（"下一城区 · 大阪"），
+   * 大阪是城市不是城区，而"下一章 · 东京"这个真正要玩家等的信号反而没出现。
+   * 红只留给**真的跨章**那一下 —— 同章内变红会把"可以切场景"这个信号稀释掉，
+   * 开门（可推进）由当前节点的红圈和下面那行「已突破」负责。 */
+  const cross=r.nextChapter.key!==r.chapter.key;
+  text((cross?'下一章 · ':'本章 · ')+r.nextChapter.name,x0+w+48,27,12,(cross&&ready)?'#ff7780':'#b6cadc');
+  text('下一城区 · '+r.nextStreet.name,x0+w+48,45,12,r.nextStreet.color);
+  text(ready?'已突破 · 遥控器进入下一城区':'本区推进 '+Math.floor(r.progress*100)+'%',x0+w+48,69,12,ready?'#ff9aa2':'#b6cadc');ctx.restore();
 }
 function render(){ctx.setTransform(.5,0,0,.5,0,0);ctx.clearRect(0,0,W,H);drawSky();ctx.save();let center=p.x-camera,s=sceneZoom*zoom*.8;ctx.translate(center,H*.72);ctx.scale(s,s);ctx.translate(-center,-G);if(shake>0)ctx.translate(Math.sin(time*90)*shake,Math.cos(time*73)*shake*.45);drawSky();drawGround();drawBuildings(0);drawBuildings(1);drawWrecks();for(let e of enemies)if(alive(e))drawEnemy(e);drawGodzilla(SK,BS);drawBeam();for(let b of bullets){let t=b.trail.map(v=>[v[0]-camera,v[1]]);if(t.length>1)line(t,b.type==='electric'?'#84dfff':'#ffa155',3);rect(b.x-camera-5,b.y-3,10,6,b.type==='electric'?'#bfffff':'#fff0a2');}for(let e of enemies)if(!alive(e))drawEnemy(e);for(let f of fires)if(Math.abs(f.x-camera-W/2)<W){const fireScale=clamp(bodyScale()*(1+(f.jitter||0)),.25,1.25);fire(f.x-camera,f.y,f.size*3.2*fireScale*Math.min(1,(24-f.age)/8));}drawParticles();drawBuildings(2);drawForeground();drawWeather();ctx.restore();drawCampaignRoute();const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'#01091b65');shade.addColorStop(.2,'#010a1900');shade.addColorStop(.75,'#010a1900');shade.addColorStop(1,'#02091b88');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);out.drawImage(buffer,0,0,W,H);
-monitor.drawImage(buffer,clamp((p.x-camera)/2-15,0,420),130,210,130,0,0,240,130);monitor.fillStyle='#153d5633';monitor.fillRect(0,0,240,130);monitor.fillStyle='#f0505d';monitor.fillRect(8,8,4,4);if(channel!=='live')drawChannel();}
+if(channel==='live'){monitor.drawImage(buffer,clamp((p.x-camera)/2-15,0,420),130,210,130,0,0,240,130);monitor.fillStyle='#153d5633';monitor.fillRect(0,0,240,130);monitor.fillStyle='#f0505d';monitor.fillRect(8,8,4,4);}if(channel!=='live')drawChannel();}
 const ACTIONS={walk:['持续跟踪','目标正在向城市深处移动'],claw:['现场：巨爪横扫','挥爪、击飞与建筑结构破坏'],beam:['高能预警：原子吐息','口部射线正在锁定前方目标'],stomp:['地震警报：巨兽重踏','地面冲击波席卷近处防线'],roar:['声压异常：震慑咆哮','空中编队失去稳定，炮弹被震散'],tail:['现场：尾部横扫','后方与前景建筑受到大范围撞击']};
+const PROGRAMS={
+  news:{label:'GNN 新闻台',short:'CH 02',title:'GNN 24H 新闻 · 东京特别报道',sub:'主播 林岚 / 现场记者持续连线',accent:'#ff5b6b'},
+  variety:{label:'GNN 娱乐台',short:'CH 03',title:'巨兽娱乐现场 · 今晚最强综艺',sub:'主持人：小麦 / 城市挑战赛直播中',accent:'#ffcf5a'},
+  drama:{label:'GNN 剧集台',short:'CH 04',title:'《霓虹防线》 · 第 12 集',sub:'本集：最后一栋楼的守望',accent:'#c58cff'},
+  anime:{label:'GNN 动画台',short:'CH 05',title:'《小小怪兽队》 · 像素大冒险',sub:'下一站：彩虹废墟！',accent:'#6de5ff'},
+  documentary:{label:'GNN 纪录台',short:'CH 06',title:'巨兽观察 · 城市生态志',sub:'解说：周墨 / 生物行为观察',accent:'#70e7b0'},
+  weather:{label:'GNN 气象台',short:'CH 07',title:'城市气象 · 雷暴云团追踪',sub:'气象主播：苏晴 / 风暴路径实时更新',accent:'#8bd4ff'}
+};
 /* —— 电视转台：4 个不影响后台游戏的频道（测试图 / 气象雷达 / 雪花 / 档案）+ 直播。
  * 切台只盖住画面画布，update 始终在跑，所以游戏进度、核能、进化都不中断；
  * 切回直播即恢复游戏画面。 —— idle.cjs 默认停在直播频道，不会触发 drawChannel。 */
-function channelName(ch){return{live:'直播',bars:'测试图',radar:'气象雷达',noise:'雪花',archive:'档案'}[ch]||ch;}
-const CHANNEL_ORDER=['live','bars','radar','noise','archive'];
-function setChannel(ch){channel=ch;channelCanvas.hidden=(ch==='live');let cyc=$('chan-cycle');if(cyc){cyc.classList.toggle('on',ch!=='live');let sp=cyc.querySelector('span');if(sp)sp.textContent=channelName(ch);}if(ch==='live')notice('已返回直播');else notice('已切换到频道 '+channelName(ch)+'（后台游戏继续运行）');}
+function channelName(ch){return ch==='live'?'直播':PROGRAMS[ch]?.label||ch;}
+const CHANNEL_ORDER=['live','news','variety','drama','anime','documentary','weather'];
+function setChannel(ch){channel=ch;channelNoise=.32;channelFlash=.12;channelCanvas.hidden=(ch==='live');$('stage').classList.toggle('channel-active',ch!=='live');let cyc=$('chan-cycle');if(cyc){cyc.classList.toggle('on',ch!=='live');let sp=cyc.querySelector('span');if(sp)sp.textContent=channelName(ch);}audioInit();noise(.16,.22,2400);tone(ch==='live'?180:92,.12,'square',.08, ch==='live'?320:55);if(ch==='live')notice('已返回 GNN 主直播');else notice('正在接收 '+channelName(ch)+' · '+PROGRAMS[ch].short);}
 function cycleChannel(){let i=(CHANNEL_ORDER.indexOf(channel)+1)%CHANNEL_ORDER.length;setChannel(CHANNEL_ORDER[i]);}
-function channelLabel(g,title,ch){g.fillStyle='#0a1830';g.fillRect(0,0,1280,70);g.fillStyle='#9decef';g.font='26px Pixel, monospace';g.textAlign='left';g.fillText(title,30,46);g.fillStyle='#ff5b6b';g.fillRect(1188,18,64,36);g.fillStyle='#fff';g.font='24px Pixel, monospace';g.textAlign='center';g.fillText(ch,1220,44);g.textAlign='left';}
-function drawChannel(){const g=channelCtx;g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,1280,720);
- if(channel==='bars'){const bars=['#c0c0c0','#c0c000','#00c000','#00c0c0','#0000c0','#c000c0','#c00000'];for(let i=0;i<7;i++)g.fillStyle=bars[i],g.fillRect(i*183,90,183,420);g.fillStyle='#000';g.fillRect(1128,90,152,300);g.fillStyle='#fff';g.fillRect(1128,390,152,120);channelLabel(g,'测试图 · TEST PATTERN','CH 02');}
- else if(channel==='radar'){g.fillStyle='#02141a';g.fillRect(0,0,1280,720);let cx=640,cy=400,R=320;g.strokeStyle='#1d6b5a';g.lineWidth=3;for(let r=R;r>40;r-=70)g.beginPath(),g.arc(cx,cy,r,0,7),g.stroke();g.beginPath(),g.moveTo(cx-R,cy),g.lineTo(cx+R,cy),g.moveTo(cx,cy-R),g.lineTo(cx,cy+R),g.stroke();let sweep=(time*1.1)%(Math.PI*2);g.strokeStyle='#46e08a';g.beginPath(),g.moveTo(cx,cy),g.lineTo(cx+Math.cos(sweep)*R,cy+Math.sin(sweep)*R),g.stroke();g.fillStyle='#46e08a';for(let i=0;i<5;i++){let a=sweep-i*.5,rr=R*(.3+i*.14);g.beginPath(),g.arc(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr,6,0,7),g.fill();}channelLabel(g,'气象雷达 · SECTOR '+String(data.district).padStart(3,'0'),'CH 03');}
- else if(channel==='noise'){for(let i=0;i<2400;i++){let x=Math.floor(Math.random()*1280),y=Math.floor(Math.random()*720),v=180+Math.random()*75|0;g.fillStyle='rgba('+v+','+v+','+(v+10|0)+','+(.25+Math.random()*.5)+')';g.fillRect(x,y,3,3);}channelLabel(g,'无信号 · NO SIGNAL','CH 04');}
- else if(channel==='archive'){g.fillStyle='#050a1e';g.fillRect(0,0,1280,720);for(let i=0;i<46;i++){let h=120+((i*53)%200),x=i*28;g.fillStyle=i%2?'#16243f':'#1d3052';g.fillRect(x,720-h,h*0.7,h);if((i*7)%5===0){g.fillStyle='#ffd477';g.fillRect(x+h*0.2,720-h*0.6,5,5);g.fillStyle=i%2?'#16243f':'#1d3052';}}channelLabel(g,'巨兽观测档案 · 最近突变','CH 05');let muts=economy.recentMutations(7),y=120;for(let mm of muts){g.fillStyle=mm.color;g.font='22px Pixel, monospace';g.textAlign='left';g.fillText('◆ '+mm.name+'（'+(P.RARITY_BY_KEY[mm.rarity]?P.RARITY_BY_KEY[mm.rarity].name:'')+'）',70,y);y+=44;}}
- g.setTransform(1,0,0,1,0,0);}
+function channelLabel(g,title,ch,accent='#9decef',sub=''){g.fillStyle='#071426';g.fillRect(0,0,1280,82);g.fillStyle=accent;g.fillRect(0,78,1280,4);g.fillStyle=accent;g.font='26px Pixel, monospace';g.textAlign='left';g.fillText(title,30,43);g.fillStyle='#fff';g.font='18px Pixel, monospace';g.fillText(sub,30,68);g.fillStyle=accent;g.fillRect(1168,18,84,40);g.fillStyle='#071426';g.font='22px Pixel, monospace';g.textAlign='center';g.fillText(ch,1210,45);g.textAlign='left';}
+function presenter(g,x,y,name,color){g.fillStyle=color;g.fillRect(x,y,150,230);g.fillStyle='#f0c19b';g.fillRect(x+35,y+28,80,80);g.fillStyle='#1b243c';g.fillRect(x+23,y+112,105,118);g.fillStyle='#fff';g.font='18px Pixel, monospace';g.fillText(name,x+18,y+260);}
+function drawProgram(ch,g){const q=PROGRAMS[ch];g.fillStyle='#101b35';g.fillRect(0,0,1280,720);g.fillStyle=q.accent;g.fillRect(0,82,1280,8);g.fillStyle='#e9f3ff';g.font='34px Pixel, monospace';g.fillText(q.title,42,135);g.fillStyle='#a6bdd2';g.font='20px Pixel, monospace';g.fillText(q.sub,44,170);presenter(g,80,245,ch==='news'?'林岚':ch==='variety'?'小麦':ch==='weather'?'苏晴':'主持人',q.accent);g.fillStyle='#152847';g.fillRect(320,225,850,300);g.strokeStyle=q.accent;g.lineWidth=4;g.strokeRect(320,225,850,300);g.fillStyle='#dcecff';g.font='28px Pixel, monospace';g.fillText(ch==='news'?'突发：巨兽已突破第 '+data.district+' 区防线':ch==='variety'?'城市挑战赛：谁能猜中下一栋倒塌的大楼？':ch==='drama'?'“如果城市注定要重建，我们就守到最后一秒。”':ch==='anime'?'小怪兽：出发！把坏蛋赶出彩虹废墟！':ch==='documentary'?'镜头记录：巨兽步态与城市生态正在共同变化。':'雷暴带向 '+cityTitle()+' 靠近，预计持续 '+(12+data.district)+' 分钟。',355,310);g.fillStyle='#87a9c5';g.font='20px Pixel, monospace';g.fillText('现场连线 / 节目正在播出 / GNN LIVE',355,372);g.fillStyle='#071426';g.fillRect(320,555,850,65);g.fillStyle=q.accent;g.font='23px Pixel, monospace';g.fillText('◆ '+q.label+'　◆　正在播报　◆　节目内容实时更新',345,595);channelLabel(g,q.title,q.short,q.accent,q.sub);}
+function drawChannel(){const g=channelCtx;g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,1280,720);if(channel==='live')return;if(PROGRAMS[channel])drawProgram(channel,g);if(channelNoise>0){g.fillStyle='rgba(220,240,255,'+channelNoise+')';g.fillRect(0,0,1280,720);channelNoise=Math.max(0,channelNoise-.018);}if(channelFlash>0){g.fillStyle='#dffaff';g.fillRect(0,0,1280,720);channelFlash=Math.max(0,channelFlash-.06);}g.setTransform(1,0,0,1,0,0);}
 function buildUI(){let icons={power:'✦',atomic:'◈',metabolism:'▥',stride:'↗'};$('statsPanel').innerHTML=Object.entries(P.STATS).map(([k,s])=>`<article class="upgrade-card"><div class="card-top"><span class="upgrade-icon">${icons[k]}</span><span class="level" id="lv-${k}">LV 01</span></div><h3>${s.name}</h3><p>${s.desc}</p><div class="effect" id="effect-${k}"></div><button id="up-${k}" aria-label="强化${s.name}"><span>强化 +1</span><b id="cost-${k}"></b></button></article>`).join('');for(let k in P.STATS)$('up-'+k).onclick=()=>{if(economy.upgrade(k)){notice(P.STATS[k].name+' 已强化');save();hud();}};
 let branches={kinetic:['动能破坏','KINETIC'],atomic:['原子突变','ATOMIC'],evolution:['适应进化','EVOLUTION']};
 $('skillsPanel').innerHTML=Object.entries(branches).map(([branch,names])=>`<section class="skill-branch"><h3>${names[0]} / ${names[1]}</h3><div class="skill-chain">${P.SKILLS.filter(s=>s.branch===branch).map((s,i)=>`<article class="skill-node" id="node-${s.id}" data-requires="${s.requires||''}"><span class="skill-order">0${i+1}</span><div class="skill-copy"><h4>${s.name}</h4><p>${s.desc}</p><p class="skill-prerequisite">${s.requires?'前置：'+P.SKILLS.find(n=>n.id===s.requires).name:'起始节点 · 无前置'} · ${s.cost} 突变点</p></div><button id="skill-${s.id}" aria-label="解锁${s.name}">${s.cost} 点</button></article>`).join('')}</div></section>`).join('');
@@ -591,6 +629,36 @@ function processMutationEvent(r){
   sound('pickup');
 }
 
+/* 加点 / 核能购买 / 掷骰进化这三组按钮"能不能点"，只由当前数值决定，
+ * 与"观测面板是否可见"无关 —— 所以把门单独抽出来，挂在 hud() 的 200ms 心跳上。
+ *
+ * ⚠️ 治的是一个**只发生在电视窗口**的静默故障（2026-09-18 主人报的
+ * "加点按钮和变异按钮按下去没反应"）：
+ *   · renderGrowthPanels() 在电视窗口里一次都不会跑 —— tv-preload 的
+ *     guardMainPanel() 用 MutationObserver 把 #management 永久按住 hidden，
+ *     hud() 里那句重绘的守卫 `if(!$('management').hidden)` 于是恒为假，
+ *     剩下的触发点只有"某个命令成功执行之后"那一次；
+ *   · 于是这三个按钮带着**上一次成功操作那一刻**的 disabled 活着：
+ *     用光点数被置灰 → 之后升级再把点数发回来 → 按钮仍然是灰的；
+ *   · 而 panelCommand() 第一句就是 `if(!el||el.disabled)return null;`，
+ *     面板点过来的命令被静默丢掉，两端都不报错，看起来就是"按下去没反应"。
+ * 实测（.workbuddy/probe-growth-gate.cjs）：升级把点数发回来后，
+ * 面板侧已亮、电视侧仍是灰的，命令返回 null 且数据不变。
+ *
+ * 门与 renderAssignPanel() 共用同一个 statGate()，不许出现第二份判据。 */
+function statGate(k){
+  const cap=500;
+  return {assign:data.assign<=0||data.levels[k]>=cap,buy:data.energy<economy.cost(k)||data.levels[k]>=cap};
+}
+function syncGrowthGates(){
+  for(const k in P.STATS){
+    const gate=statGate(k),a=$('assign-'+k),b=$('buy-'+k);
+    if(a)a.disabled=gate.assign;
+    if(b)b.disabled=gate.buy;
+  }
+  const roll=$('rollEvo');if(roll)roll.disabled=(data.evoRolls<=0);
+}
+
 /* 渲染三个成长面板。每次点数变化后都要重画，因为它们都显示实时数字。 */
 function renderGrowthPanels(){
   renderAssignPanel();renderTalentPanel();renderEvoPanel();
@@ -601,10 +669,10 @@ function renderAssignPanel(){
   $('assignCount').textContent=d.assign;
   for(let k in P.STATS){
     let s=P.STATS[k];
-    let lv=d.levels[k],cap=500;
-    let aBtn=$('assign-'+k),bBtn=$('buy-'+k);
-    if(bBtn){bBtn.textContent=fmt(economy.cost(k))+' 核能';bBtn.disabled=d.energy<economy.cost(k)||lv>=cap;}
-    if(aBtn){aBtn.disabled=(d.assign<=0||lv>=cap);aBtn.textContent='加点 +1';}
+    let lv=d.levels[k];
+    let aBtn=$('assign-'+k),bBtn=$('buy-'+k),gate=statGate(k);
+    if(bBtn){bBtn.textContent=fmt(economy.cost(k))+' 核能';bBtn.disabled=gate.buy;}
+    if(aBtn){aBtn.disabled=gate.assign;aBtn.textContent='加点 +1';}
     let lvEl=$('lv-'+k);if(lvEl)lvEl.textContent='LV '+String(lv).padStart(2,'0');
     let alv=$('alv-'+k);if(alv)alv.textContent='LV '+String(lv).padStart(2,'0');
     let ef=$('effect-'+k),aef=$('aeffect-'+k),eff;
@@ -698,7 +766,7 @@ function showEvoResult(r){
   if(r.rarity==='legend'){document.body.classList.add('whiteflash');setTimeout(()=>document.body.classList.remove('whiteflash'),200);}
   if(r.rarity==='epic'||r.rarity==='legend')sound('pickup');
 }
-function hud(){const targetDistrict=panelMode?(data.world?.nextDistrict>data.district?data.district+1:null):mapGate?.district;const nextButton=$('nextMap');nextButton.disabled=!targetDistrict;nextButton.classList.toggle('ready',!!targetDistrict);nextButton.textContent=targetDistrict?'进入 '+P.chapterFor(targetDistrict).title:'进入下一张地图';tickerWidth=$('tickerText').offsetWidth||1200;headlineWidth=$('headline').offsetWidth||600;headlineViewport=$('headline').parentElement?.clientWidth||500; $('energy').textContent=fmt(data.energy);$('production').textContent='+'+economy.passive().toFixed(1)+' / 秒 · 另有破坏收益';$('level').textContent=String(data.level).padStart(2,'0');$('dna').textContent=fmt(data.dna);$('destroyed').textContent=fmt(data.cleared);$('distance').textContent='已推进 '+fmt(data.meters)+' m · 击破 '+fmt(data.kills);$('evoProgress').textContent=Math.floor(data.xp)+' / '+economy.nextXP()+' G-XP';$('xpFill').style.width=clamp(data.xp/economy.nextXP()*100,0,100)+'%';let effects={power:'破坏力 '+Math.round(economy.power()),atomic:'吐息 '+Math.round(economy.atomic())+' / 秒',metabolism:'收益倍率 ×'+economy.rewardMult().toFixed(2),stride:'基础步速 '+Math.round(economy.speed())+' / 秒'};for(let k in P.STATS){$('lv-'+k).textContent='LV '+String(data.levels[k]).padStart(2,'0');$('effect-'+k).textContent=effects[k];$('cost-'+k).textContent=fmt(economy.cost(k))+' 核能';$('up-'+k).disabled=data.energy<economy.cost(k)||data.levels[k]>=500;}for(let s of P.SKILLS){let learned=economy.has(s.id),blocked=s.requires&&!economy.has(s.requires);$('node-'+s.id).classList.toggle('learned',learned);$('skill-'+s.id).textContent=learned?'已觉醒':blocked?'前置未解锁':s.cost+' 点';$('skill-'+s.id).disabled=learned||!!blocked||data.dna<s.cost;}
+function hud(){const targetDistrict=panelMode?(data.world?.nextDistrict>data.district?data.district+1:null):mapGate?.district;const nextButton=$('nextMap');nextButton.disabled=!targetDistrict;nextButton.classList.toggle('ready',!!targetDistrict);nextButton.textContent=targetDistrict?nextMapLabel(targetDistrict,data.district):'进入下一张地图';tickerWidth=$('tickerText').offsetWidth||1200;headlineWidth=$('headline').offsetWidth||600;headlineViewport=$('headline').parentElement?.clientWidth||500; $('energy').textContent=fmt(data.energy);$('production').textContent='+'+economy.passive().toFixed(1)+' / 秒 · 另有破坏收益';$('level').textContent=String(data.level).padStart(2,'0');$('dna').textContent=fmt(data.dna);$('destroyed').textContent=fmt(data.cleared);$('distance').textContent='已推进 '+fmt(data.meters)+' m · 击破 '+fmt(data.kills);$('evoProgress').textContent=Math.floor(data.xp)+' / '+economy.nextXP()+' G-XP';$('xpFill').style.width=clamp(data.xp/economy.nextXP()*100,0,100)+'%';let effects={power:'破坏力 '+Math.round(economy.power()),atomic:'吐息 '+Math.round(economy.atomic())+' / 秒',metabolism:'收益倍率 ×'+economy.rewardMult().toFixed(2),stride:'基础步速 '+Math.round(economy.speed())+' / 秒'};for(let k in P.STATS){$('lv-'+k).textContent='LV '+String(data.levels[k]).padStart(2,'0');$('effect-'+k).textContent=effects[k];$('cost-'+k).textContent=fmt(economy.cost(k))+' 核能';$('up-'+k).disabled=data.energy<economy.cost(k)||data.levels[k]>=500;}syncGrowthGates();for(let s of P.SKILLS){let learned=economy.has(s.id),blocked=s.requires&&!economy.has(s.requires);$('node-'+s.id).classList.toggle('learned',learned);$('skill-'+s.id).textContent=learned?'已觉醒':blocked?'前置未解锁':s.cost+' 点';$('skill-'+s.id).disabled=learned||!!blocked||data.dna<s.cost;}
 /* 这里原来还有一段写给画面常驻 HUD 的赋值（核能 / 等级 / 经验条 / 天赋点 /
  * 随机变异名）。那排 2026-09-17 按反馈从电视画面上移除了，元素不存在，
  * 继续写会直接抛在 $() 上 —— 所以整段删掉，不是加 if 守卫绕过去。

@@ -7,6 +7,9 @@
 ```
 doc/
 ├── README.md                    你正在看的这份：索引、阅读顺序、写作约定
+├── 游戏逻辑梳理.md               【现状 · 2026-09-18】整份游戏现在到底怎么跑：主循环、
+│                                世界与推图、自动战斗、经济成长、体型外观、存档、
+│                                外壳面板，外加一节「文档与代码不一致」
 └── game-design/                 【规划中 · 尚未建立】游戏设计文档，下列文件一个都还没写
     ├── 01-设计总纲.md            体验目标、设计支柱、铁律、与现有实现的边界
     ├── 02-关卡路线.md            第 2 章 5 个关卡的完整路线设计
@@ -33,6 +36,7 @@ doc/
 | [`godzilla-pet/tv/DESIGN.md`](../godzilla-pet/tv/DESIGN.md) | 画面 | **已上线版本**的数值公式、AI 决策、破坏状态机 |
 | [`godzilla-pet/tv/ART-DIRECTION.md`](../godzilla-pet/tv/ART-DIRECTION.md) | 画面 | 原图拆件、造型还原、动画实现 |
 | [`godzilla-pet/tv/CHANGELOG.md`](../godzilla-pet/tv/CHANGELOG.md) | 画面 | 画面 2.0 → 2.3 版本记录 |
+| [`游戏逻辑梳理.md`](游戏逻辑梳理.md) | 现状 | **跨模块的整体地图**：一个数从哪来、流到哪去；含「文档与代码不一致」清单 |
 | `doc/game-design/*` | 设计 | **尚未实现**的后续关卡、天气、成长系统设计 |
 
 > **`tv/DESIGN.md` 与 `doc/game-design/` 的分工**：前者描述**已经跑起来**的那套数值，
@@ -46,7 +50,8 @@ doc/
 
 | 你想做什么 | 按这个顺序读 |
 | --- | --- |
-| 第一次上手这个项目 | `../README.md` → 本文档 → `godzilla-pet/README.md` |
+| 第一次上手这个项目 | `../README.md` → 本文档 → [`游戏逻辑梳理.md`](游戏逻辑梳理.md) → `godzilla-pet/README.md` |
+| 想先弄清"整个游戏现在怎么跑" | [`游戏逻辑梳理.md`](游戏逻辑梳理.md)（含已知的文档/代码不一致） |
 | 改数值 / 平衡 | `tv/DESIGN.md` |
 | 改成长：体型 / 等级门槛 / 体征解锁 | `tv/growth.js`（成长数值的**单一真源**）→ `tv/DESIGN.md` 的「成长与体貌」 |
 | 加新关卡 | `tv/DESIGN.md` → `tv/README.md` |
