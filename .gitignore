@@ -3,6 +3,19 @@
 node_modules/
 dist/*.app/
 
+# 打包产物：解包目录与安装包体积巨大（单文件 100MB 以上），不进版本库。
+# dist/ 只保留体积可控的单文件 HTML 预览版；需要安装包时本地重新构建。
+godzilla-pet/dist/win-unpacked/
+godzilla-pet/dist/win/
+godzilla-pet/dist/linux-unpacked/
+godzilla-pet/dist/*.exe
+godzilla-pet/dist/*.blockmap
+godzilla-pet/dist/*.dmg
+godzilla-pet/dist/*.zip
+godzilla-pet/dist/builder-debug.yml
+godzilla-pet/dist/builder-effective-config.yaml
+godzilla-pet/dist/.icon-ico/
+
 # 智能体在工作目录里留下的笔记与临时文件，不属于产品的一部分
 .workbuddy/
 
