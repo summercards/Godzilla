@@ -309,11 +309,15 @@ const OFFLINE_XP_RATIO = 0.12;
 
 /* ------------------------------------------------------------------ *
  * 体征期：每 25 级一个质变台阶，不单独存储，由 level 推导
+ *
+ * ⚠️ 这里**不写镜头值**。2026-09-18 之前每档带一个 camera（1.30/1.16/1.00），
+ * 换场时画面会硬缩一档 —— L8 倒退 2.9%、L18 倒退 7.3%，而升一级只涨 1.5%。
+ * 镜头真源是 growth.VIEW / growth.cameraScale()，本表只管行程与等级的解锁。
  * ------------------------------------------------------------------ */
 const STAGES = [
-  { key: 'village', name: '现代村庄', minMeters: 0, minLevel: 1, camera: 1.30, enemyTier: 0 },
-  { key: 'suburb', name: '城郊防线', minMeters: 2600, minLevel: 8, camera: 1.16, enemyTier: 1 },
-  { key: 'city', name: '城区核心', minMeters: 7200, minLevel: 18, camera: 1.00, enemyTier: 2 },
+  { key: 'village', name: '现代村庄', minMeters: 0, minLevel: 1, enemyTier: 0 },
+  { key: 'suburb', name: '城郊防线', minMeters: 2600, minLevel: 8, enemyTier: 1 },
+  { key: 'city', name: '城区核心', minMeters: 7200, minLevel: 18, enemyTier: 2 },
 ];
 function stageIndexFor(data) {
   const meters = Number(data?.meters) || 0;

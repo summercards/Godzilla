@@ -57,18 +57,39 @@ const stageAt=P.stageIndexFor;
 let stageIndex=Math.max(stageAt(data),0,STAGES.findIndex(s=>s.key===data.world?.stage));
 function currentStage(){return STAGES[stageIndex];}
 function currentChapter(){return P.chapterFor(data.district);}
-function currentRoute(){return P.routeFor(data.district,(p.x-420)/(LENGTH-260-420));}
+function mapProgress(){return mapGate?1:Math.min(1,Math.min(1,Math.max(0,data.cleared-mapStartCleared)/12)*.6+Math.min(1,Math.max(0,data.kills-mapStartKills)/8)*.4);}
+function currentRoute(){return P.routeFor(data.district,mapProgress());}
 function chapterLocation(){return currentChapter().title+' · '+currentRoute().street.name;}
 function cityTitle(){return currentChapter().title;}
 let mapGate=null;
-function loopCurrentMap(){
-  // 路段走完就铺设同城区的新路段；突破资格独立保留，绝不把空地当终点。
+let mapStartCleared=Number.isFinite(data.world?.mapStartCleared)?data.world.mapStartCleared:data.cleared;
+let mapStartKills=Number.isFinite(data.world?.mapStartKills)?data.world.mapStartKills:data.kills;
+const CHUNK_SPAN=3400;
+let worldChunk=0;
+function announceMapGate(){
   if(!mapGate)mapGate={district:data.district+1};
   const next=$('nextMap');if(next){next.disabled=false;next.classList.add('ready');next.textContent='进入 '+P.chapterFor(mapGate.district).title;}
-  generateWorld();save();
 }
-function requestNextMap(){if(!mapGate)return false;data.district=mapGate.district;data.dna+=2;grant(180+data.district*30,P.xpPerDistrict(data.district));mapGate=null;const next=$('nextMap');if(next){next.disabled=true;next.classList.remove('ready');next.textContent='进入下一张地图';}generateWorld();save();return true;}
-function advanceStage(){const next=stageAt(data);if(next<=stageIndex)return;const snapshot=worldSnapshot();stageIndex=next;generateWorld(snapshot);save();banner('进入 '+currentStage().name,'累计行程 '+Math.floor(data.meters)+' m · LV '+data.level);}let rigState=KaijuRig.pose(p,0);let BS=bodyScale(),SM=rigState.muzzle,SK=scaleRig(rigState,BS,p.x,G);
+function appendWorldChunk(){
+  // 每块独立播种：只重建存档附近的块，也能还原同一栋楼的尺寸与外观。
+  seed=(1701+data.district*983+Math.imul(worldChunk,7919))>>>0;
+  const stage=currentStage(),diff=P.Kb(data.district),base=LENGTH-400+(worldChunk-1)*CHUNK_SPAN;
+  for(let layer=0;layer<3;layer++){
+    let i=worldChunk*20;
+    for(let x=base+(layer===1?0:layer===0?-80:80);x<base+CHUNK_SPAN-400;x+=layer===1?210:layer===0?185:310){
+      let w=layer===2?125+rnd()*60:100+rnd()*57,h=stage.key==='village'?(layer===2?38+rnd()*24:70+rnd()*62):stage.key==='suburb'?(layer===2?65+rnd()*50:130+rnd()*95):layer===2?90+rnd()*80:layer===0?210+rnd()*170:255+rnd()*170;
+      let b=makeBuilding(Math.round(x+rnd()*32),Math.round(w),Math.round(h),i+layer*13);b.layer=layer;b.id='c'+worldChunk+'-'+layer+'-'+i;
+      if(stage.key==='city'&&layer===1){b.kind='tower';b.assetId=buildingAssetId('city','tower');}
+      b.ground=G+(layer===2?32:layer===0?-14:0);b.max=b.hp=Math.round(3*(layer===1?780:layer===0?520:360)*diff*(1+Math.max(0,b.h-(layer===2?90:210))/500));b.floorCount=Math.ceil(h/35);b.tilt=(rnd()-.5)*.22;buildings.push(b);i++;
+    }
+  }
+  let choices=currentStage().key==='village'?['tank','heli','drone']:data.district>=5?['gunship','aegis','mech','jet','drone','walker','bunker']:data.district>=3?['gunship','rocket','jet','drone','walker']:data.district>=2?['rocket','heli','drone','jet']:['tank','heli','drone'];
+  for(let i=0;i<10;i++){let type=choices[i%choices.length],flying=/heli|gunship|jet|drone/.test(type);let e=enemy(type,base+380+i*330,flying?rand(165,255):undefined);e.fixed=true;e.id='c'+worldChunk+'-e'+i;enemies.push(e);}
+  worldChunk++;
+}
+function ensureWorldAhead(){while(p.x>LENGTH-1900+(worldChunk-1)*CHUNK_SPAN)appendWorldChunk();if(worldChunk>1){buildings=buildings.filter(b=>b.x>p.x-2200);enemies=enemies.filter(e=>e.x>p.x-2200||alive(e)&&Math.abs(e.x-p.x)<1350);}}
+function requestNextMap(){if(!mapGate)return false;data.district=mapGate.district;data.dna+=2;grant(180+data.district*30,P.xpPerDistrict(data.district));mapGate=null;mapStartCleared=data.cleared;mapStartKills=data.kills;const next=$('nextMap');if(next){next.disabled=true;next.classList.remove('ready');next.textContent='进入下一张地图';}generateWorld();save();return true;}
+function advanceStage(){const next=stageAt(data);if(next<=stageIndex)return;stageIndex=next;sceneZoom=cameraScale();save();banner('进入 '+currentStage().name,'累计行程 '+Math.floor(data.meters)+' m · LV '+data.level);}let rigState=KaijuRig.pose(p,0);let BS=bodyScale(),SM=rigState.muzzle,SK=scaleRig(rigState,BS,p.x,G);
 let muted=data.muted,audio=null,master=null,musicClock=0,musicStep=0,beamAudioTimer=0;
 let seed=76123;const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
 const rand=(a,b)=>a+Math.random()*(b-a),clamp=(x,a,b)=>Math.max(a,Math.min(b,x)),rect=(x,y,w,h,c)=>{ctx.fillStyle=c;ctx.fillRect(Math.round(x/2)*2,Math.round(y/2)*2,Math.ceil(w/2)*2,Math.ceil(h/2)*2);};
@@ -87,7 +108,13 @@ function fmt(n){if(n>=1e9)return(n/1e9).toFixed(2)+'B';if(n>=1e6)return(n/1e6).t
  * 总上限 1.12）。这里只做转发 —— 老实现自带一份 0.333+0.667*(1-e^(-(L-1)/9))，
  * 与 progression.js 的 globalScaleFor 是两套公式，同一个概念两个答案。
  * 现在只有一条曲线，受击盒也吃同一个值（见 rig.js 的 hitbox）。
- * 镜头（sceneZoom）只做 1.15-1.3 的轻微推拉，绝不抵消体型缩小。 */
+ *
+ * 镜头（sceneZoom）同样只做转发 —— 公式在 growth.cameraScale()。老实现是
+ * 就地算的三项 min：第一项随等级从 1.30 收到 1.00（正好抵消体型增长），
+ * 第二项按场景硬切（1.30/1.16/1.00，换场时画面倒退 −2.9% / −7.3%），
+ * 第三项因 CEIL=1.12 < 1.16 永远不是最小值、从生效过 0 次。
+ * 结果是 1→11 级体型 +29%、屏幕上只有 +15%。判据是"体型 × 镜头"这个
+ * 乘积有没有随等级变大，见 growth.VIEW 与 tests/growth-system.test.cjs。 */
 function bodyScale(){return Growth.bodyScale(data.level,data.talents,data.morph,P.EPOCHS);}
 /* 把骨骼（含挂点）按 bodyScale 围绕脚底 pivot 等比缩放，角色与挂点共用同一缩放。 */
 function scaleRig(state,bs,px,py){const mp=b=>({x:px+(b.x-px)*bs,y:py+(b.y-py)*bs,a:b.a});const bones={};for(const k in state.bones)bones[k]=mp(state.bones[k]);const pt=q=>({x:px+(q.x-px)*bs,y:py+(q.y-py)*bs});return{bones,seams:(state.seams||[]).map(s=>({x:px+(s.x-px)*bs,y:py+(s.y-py)*bs,a:s.a,rx:s.rx*bs,ry:s.ry*bs})),muzzle:pt(state.muzzle),claw:pt(state.claw),foot:pt(state.foot),tail:pt(state.tail),neutral:state.neutral};}
@@ -133,9 +160,9 @@ function burst(x,y,n=24,palette=['#fff3b7','#ffbb4d','#fa622c','#9a3940'],force=
 function smoke(x,y,size=17){particles.push({x,y,vx:rand(-24,-6),vy:rand(-55,-20),life:rand(1.3,2.8),size:rand(size*.6,size*1.5),color:['#182234','#263045','#343a4c'][Math.floor(rand(0,3))],gravity:-9,smoke:true});}
 function explosion(x,y,big=1){burst(x,y,Math.round(35*big),undefined,230*big);rings.push({x,y,r:5,life:.38,color:'#ffd07b',type:'blast'});shake=Math.max(shake,6*big);slow=Math.max(slow,.07*big);sound('boom');}
 function enemy(type,x,y){let spec=TYPES[type],hp=spec.hp*P.Ke(data.district)*(currentStage().key==='village'?.6:1);return {type,x,y:y??G-17,baseY:y??G-17,hp,max:hp,cd:rand(1,4),hit:0,phase:rand(0,7),state:'alive',vx:0,vy:0,rotation:0,spin:0,age:0,hitIds:new Set()};}
-function cameraScale(){return Math.min(1.3-0.3*clamp((data.level-1)/24,0,1),currentStage().camera,1.16/bodyScale());}
+function cameraScale(){return Growth.cameraScale(data.level,data.talents,data.morph,P.EPOCHS);}
 function cameraTarget(){return p.x-(420+140*clamp((bodyScale()-.333)/.787,0,1));}
-function worldSnapshot(){return {district:data.district,stage:currentStage().key,x:p.x,nextDistrict:mapGate?.district||null,buildings:buildings.map(b=>({id:b.id,hp:b.hp,max:b.max,dead:b.dead})),enemies:enemies.filter(e=>e.fixed).map(e=>({id:e.id,hp:e.hp,state:e.state}))};}
+function worldSnapshot(){return {district:data.district,stage:currentStage().key,x:p.x,nextDistrict:mapGate?.district||null,mapStartCleared,mapStartKills,worldChunk,buildings:buildings.filter(b=>b.x>p.x-2200).map(b=>({id:b.id,hp:b.hp,max:b.max,dead:b.dead})),enemies:enemies.filter(e=>e.fixed&&e.x>p.x-2200).map(e=>({id:e.id,hp:e.hp,state:e.state}))};}
 function save(){if(panelMode)return;try{SAVEIO.setItem(SAVE,economy.serialize(Date.now(),worldSnapshot()));if(browserPanel&&!browserPanel.closed)browserPanel.__growth?.sync(JSON.stringify(data));storageOK=true;$('saveState').innerHTML='<i></i> 进化进度已保存';}catch{storageOK=false;$('saveState').textContent='当前窗口运行 · 无法写入存档';}}
 function generateWorld(restore){seed=1701+data.district*983;buildings=[];enemies=[];bullets=[];fires=[];wrecks=[];particles=[];rings=[];beam=null;
 const stage=currentStage();sceneZoom=cameraScale();
@@ -143,9 +170,10 @@ let diff=P.Kb(data.district);for(let layer=0;layer<3;layer++){let i=0;for(let x=
 if(stage.key==='city'&&layer===1){b.kind='tower';b.assetId=buildingAssetId('city','tower');}b.ground=G+(layer===2?32:layer===0?-14:0);b.max=b.hp=Math.round(3*(layer===1?780:layer===0?520:360)*diff*(1+Math.max(0,b.h-(layer===2?90:210))/500));b.floorCount=Math.ceil(h/35);b.tilt=(rnd()-.5)*.22;buildings.push(b);i++;}}
 let tier=stage.key==='village'?1:stage.key==='suburb'?Math.min(3,data.district):Math.min(5,data.district);for(let i=0;i<16;i++){let type='tank';if(i%4===1)type='heli';else if(i%4===3&&tier>=2)type='rocket';if(tier>=3&&i%5===2)type='gunship';if(tier>=4&&i%5===3)type='aegis';if(tier>=5&&i%7===0)type='mech';if(tier>=2&&i%6===4)type='drone';if(tier>=4&&i%6===1)type='jet';if(tier>=3&&i%8===5)type='walker';if(tier>=4&&i%9===7)type='bunker';if(stage.key==='village'&&i%4===2)type='drone';let flying=/heli|gunship|jet|drone/.test(type);let e=enemy(type,620+i*253,flying?(stage.key==='village'?G-190:165)+i%3*28:undefined);e.fixed=true;e.id='e'+i;enemies.push(e);}
 if(stage.key!=='village'&&data.district>=2){let type=stage.key==='city'?'mech':'aegis',e=enemy(type,LENGTH-390);e.max=e.hp*=2;e.fixed=true;e.id='gate';e.gate=true;enemies.push(e);}
+worldChunk=1;const savedChunks=restore?.district===data.district?Math.floor(Number(restore.worldChunk)||1):1;const count=Math.max(1,Math.min(savedChunks,1000000));for(let i=Math.max(1,count-2);i<count;i++){worldChunk=i;appendWorldChunk();}
 p.x=420;p.action={name:'walk',t:0};p.cooldowns={beam:18,stomp:7,tail:10,roar:19};p.step=0;p.angle=.12;
-if(restore&&restore.district===data.district){p.x=clamp(Number(restore.x)||420,420,LENGTH-50);let states=new Map((Array.isArray(restore.buildings)?restore.buildings:[]).map(b=>[b.id,b]));for(let b of buildings){let s=states.get(b.id);if(s){let oldMax=Number(s.max)>0?Number(s.max):(b.layer===1?230:b.layer===0?120:85)*(1+Math.max(0,data.district-1)*.12);b.hp=b.max*clamp((Number(s.hp)||0)/oldMax,0,1);b.dead=s.dead===true||b.hp<=0;b.collapse=b.dead?3:0;}}let es=new Map((Array.isArray(restore.enemies)?restore.enemies:[]).map(e=>[e.id,e]));for(let e of enemies){let s=es.get(e.id);if(s){e.hp=clamp(Number(s.hp)||0,0,e.max);if(s.state!=='alive'||e.hp<=0)e.state='gone';}}}
-camera=cameraTarget();$('location').textContent=cityTitle();refreshTicker();commitTicker();tickerOffset=0;spawnTimer=7;if(restore?.nextDistrict>data.district){mapGate={district:data.district+1};const next=$('nextMap');if(next){next.disabled=false;next.classList.add('ready');next.textContent='进入 '+P.chapterFor(mapGate.district).title;}}}
+if(restore&&restore.district===data.district){p.x=clamp(Number(restore.x)||420,420,LENGTH+Math.max(0,worldChunk-2)*CHUNK_SPAN+CHUNK_SPAN);let states=new Map((Array.isArray(restore.buildings)?restore.buildings:[]).map(b=>[b.id,b]));for(let b of buildings){let s=states.get(b.id);if(s){let oldMax=Number(s.max)>0?Number(s.max):(b.layer===1?230:b.layer===0?120:85)*(1+Math.max(0,data.district-1)*.12);b.hp=b.max*clamp((Number(s.hp)||0)/oldMax,0,1);b.dead=s.dead===true||b.hp<=0;b.collapse=b.dead?3:0;}}let es=new Map((Array.isArray(restore.enemies)?restore.enemies:[]).map(e=>[e.id,e]));for(let e of enemies){let s=es.get(e.id);if(s){e.hp=clamp(Number(s.hp)||0,0,e.max);if(s.state!=='alive'||e.hp<=0)e.state='gone';}}}
+if(worldChunk>1){buildings=buildings.filter(b=>b.x>p.x-2200);enemies=enemies.filter(e=>e.x>p.x-2200||alive(e)&&Math.abs(e.x-p.x)<1350);}camera=cameraTarget();$('location').textContent=cityTitle();refreshTicker();commitTicker();tickerOffset=0;spawnTimer=7;if(restore?.nextDistrict>data.district)announceMapGate();}
 function grant(n,xp,x,y){n*=economy.rewardMult();economy.gain(n,xp);if(x!==undefined)floaters.push({x,y,text:'+'+Math.round(n),life:1.2,color:'#a0e9df'});}
 function damageBuilding(b,n,source='claw'){if(b.dead)return;b.hp-=n;b.hit=.13;if(Math.random()<.17)burst(b.x+rand(0,b.w),b.ground-b.h*.6,3,['#708299','#485568','#c5b9a3'],90);if(b.hp<=0){b.dead=true;b.hp=0;b.collapse=.001;data.cleared++;grant(30+b.h*.11,P.xpPerBuilding(data.district,b.layer),b.x+b.w/2,b.ground-b.h);fires.push({x:b.x+b.w*.6,y:b.ground-12,size:35+b.w*.12,age:0,jitter:rnd()*.2-.1});explosion(b.x+b.w/2,b.ground-b.h*.48,b.layer===1?1.6:.8);for(let j=0;j<7;j++)smoke(b.x+rand(0,b.w),b.ground-b.h*.4,30);if(b.layer===1)broadcast('建筑群接连倒塌，巨兽正突破街区封锁','现场记者：承重结构已断裂，坍塌引发连锁尘浪');}}
 function defeat(e,source='beam'){if(!alive(e))return;e.hp=0;e.age=0;e.hit=0;data.kills++;grant(TYPES[e.type].reward,P.xpPerEnemy(data.district),e.x,e.y-50);let flying=/heli|gunship/.test(e.type);if(source==='claw'||source==='tail'){e.state='flying';e.vx=rand(230,370)*(source==='tail'?-1:1);e.vy=-rand(250,390);e.spin=(source==='tail'?-1:1)*rand(4,8);burst(e.x,e.y,14,undefined,130);broadcast(flying?'直升机被巨兽击飞，正在失控翻滚':'装甲车辆被拍向半空，残骸高速翻滚','现场画面：目标将在落地时发生二次爆炸');}else if(flying){e.state='crashing';e.vx=rand(-100,160);e.vy=rand(0,50);e.spin=rand(1.8,3.5);explosion(e.x,e.y,.65);broadcast('武装直升机失控，拖着浓烟坠向街区','地面机位追踪中 · 旋翼损毁，机身持续旋转');}else{e.state='exploding';e.rotation=rand(-.12,.12);e.age=0;explosion(e.x,e.y,1.1);fires.push({x:e.x,y:G-12,size:33,age:0,jitter:rnd()*.2-.1});}}
@@ -162,7 +190,7 @@ function updateAI(dt){for(let k in p.cooldowns)p.cooldowns[k]=Math.max(0,p.coold
 if(a.name==='walk'){let blocking=buildings.filter(b=>b.layer===1&&!b.dead&&b.x+b.w>p.x).sort((a,b)=>a.x-b.x)[0];let close=enemies.filter(e=>alive(e)&&Math.abs(e.x-p.x)<340);let target=targetForBeam();let meleeTarget=(blocking&&blocking.x-p.x<65+170*BS)||close.some(e=>e.x-p.x<170&&e.x-p.x>-35&&!(/heli|gunship/.test(e.type)));
 if(p.cooldowns.stomp<=0&&(close.some(e=>!(/heli|gunship/.test(e.type)))||buildings.some(b=>!b.dead&&Math.abs(b.x-p.x)<210))){begin('stomp');}else if(p.cooldowns.tail<=0&&buildings.some(b=>!b.dead&&Math.abs(b.x-p.x+100)<360)){begin('tail');}else if(p.cooldowns.roar<=0&&close.length>=2){begin('roar');}else if(meleeTarget){begin('claw');}else if(p.cooldowns.beam<=0&&target){begin('beam',target);}else{p.moving=true;let speed=economy.speed()/Math.min(3.4,1+pressure());let next=p.x+speed*dt;if(blocking)next=Math.min(next,blocking.x-(50+170*BS));let gate=enemies.find(e=>alive(e)&&e.gate);if(gate&&p.x<gate.x)next=Math.min(next,gate.x-160);let delta=Math.max(0,next-p.x);p.x+=delta;data.meters+=delta*.12;advanceStage();p.step+=dt*2.9*(.65+speed/100);}}
 else{p.moving=false;if(a.name==='claw'&&!a.hit&&a.t>=.54){a.hit=true;doClaw();}if(a.name==='stomp'&&!a.hit&&a.t>=1){a.hit=true;doStomp();}if(a.name==='tail'&&!a.hit&&a.t>=.83){a.hit=true;doTail();}if(a.name==='roar'&&!a.hit&&a.t>=.45){a.hit=true;doRoar();}if(a.name==='beam'&&a.target){let tx=a.target.x+(a.target.w?a.target.w*.55:0),ty=a.target.w?a.target.ground-a.target.h*.64:a.target.y;p.angle+=(clamp(Math.atan2(ty-(SM||rigState.muzzle).y,tx-(SM||rigState.muzzle).x),-.48,.65)-p.angle)*Math.min(1,dt*4);}if(a.t>=DURATIONS[a.name]){begin('walk');}}
-rigState=KaijuRig.pose(p,time);BS=bodyScale();SK=scaleRig(rigState,BS,p.x,G);SM=SK.muzzle;if(p.x>LENGTH-260){if(!mapGate)banner('已突破当前地图','继续推进中 · 顶部按钮可进入下一张地图');loopCurrentMap();}}
+ensureWorldAhead();if(!mapGate&&mapProgress()>=1){announceMapGate();banner('已突破当前地图','继续推进中 · 顶部按钮可进入下一张地图');save();}rigState=KaijuRig.pose(p,time);BS=bodyScale();SK=scaleRig(rigState,BS,p.x,G);SM=SK.muzzle;}
 function rayBox(x,y,dx,dy,b){let min=0,max=1100;for(let [origin,dir,lo,hi] of [[x,dx,b.x,b.x+b.w],[y,dy,b.ground-b.h,b.ground]]){if(Math.abs(dir)<1e-6){if(origin<lo||origin>hi)return null;}else{let t1=(lo-origin)/dir,t2=(hi-origin)/dir;if(t1>t2)[t1,t2]=[t2,t1];min=Math.max(min,t1);max=Math.min(max,t2);if(min>max)return null;}}return min;}
 function updateBeam(dt){beam=null;arcs=[];let a=p.action;if(a.name!=='beam'||a.t<.95||a.t>3.55)return;let {x,y}=(SM||rigState.muzzle),dx=Math.cos(p.angle),dy=Math.sin(p.angle),hits=[];for(let b of buildings){if(b.dead)continue;let distance=rayBox(x,y,dx,dy,b);if(distance!==null&&distance>0&&distance<1100)hits.push({distance,target:b});}for(let e of enemies){if(!alive(e))continue;let ex=e.x-x,ey=e.y-y,d=ex*dx+ey*dy,off=Math.abs(ex*dy-ey*dx);if(d>0&&d<1100&&off<(e.type==='mech'?90:/heli|gunship/.test(e.type)?34:42))hits.push({distance:d,target:e});}hits.sort((a,b)=>a.distance-b.distance);let chosen=hits.slice(0,economy.has('pierce')?3:1),reach=chosen.length?chosen.at(-1).distance:1000;beam={x,y,ex:x+dx*reach,ey:y+dy*reach,super:a.super};let fire=data.subElements&&data.subElements.includes('pyro');beam.fire=fire;
 /* 火焰呼吸：伤害由原子炉心与巨兽力量共同决定（属性参与伤害），与纯光束不同；

@@ -108,6 +108,25 @@ const TV_TRANSPARENT_CSS = `
   html, body { background: transparent !important; }
 `;
 
+/* 启动期的可见底。**它存在的唯一理由是"让人看见正在启动"。**
+ *
+ * 电视窗口是 transparent + 全透明底色（见 main.js 的 createWindow），
+ * 而 TV_TRANSPARENT_CSS 要等 did-finish-load 才注入 —— 那之前桌面上
+ * 什么轮廓都没有。冷启动要好几秒（Electron 引导 1~2.5s + 页面加载 4~8s），
+ * 这几秒里用户看不见任何"正在启动"的迹象，会判断成"点了没反应"，
+ * 于是再点一次 bat；而第二次的那份进程会被单实例锁挡掉、静默退出
+ * （app.quit() 发生在 whenReady 之前，一行日志都不留）。
+ * 表现出来就是"要点两次才打开"。
+ *
+ * 做法：dom-ready 时先刷这层不透明底，等 did-finish-load 再注入
+ * TV_TRANSPARENT_CSS。两条选择器与 !important 完全相同，靠**后插入者胜**
+ * 的层叠规则收敛回透明 —— 所以这两条的注入顺序不能调换。
+ *
+ * 只影响启动那几秒，画面出来之后与以前一个像素都不差。 */
+const TV_STARTUP_CSS = `
+  html, body { background: #050a15 !important; }
+`;
+
 /* 面板窗口专属注入。面板是"另一个 tv 实例"，但它不是用来直播的 ——
  * 用户要的是一块干净的菜单：直播包装（台标条、机位小窗、字幕组、
  * 滚动新闻条、页脚）全部藏掉，只留观测面板本身。
@@ -204,6 +223,6 @@ const panelBox = (key) => {
 
 module.exports = {
   VIEWPORT, TV_SIZES, PANEL_SIZES,
-  TV_DRAG_CSS, TV_TRANSPARENT_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS,
+  TV_DRAG_CSS, TV_TRANSPARENT_CSS, TV_STARTUP_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS,
   zoomFor, panelBounds, panelBox,
 };

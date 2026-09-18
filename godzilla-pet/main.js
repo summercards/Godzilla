@@ -17,7 +17,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, dialog, nativeIm
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { TV_DRAG_CSS, TV_TRANSPARENT_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, PANEL_SIZES, zoomFor, panelBounds, panelBox } = require('./tv-config.js');
+const { TV_DRAG_CSS, TV_TRANSPARENT_CSS, TV_STARTUP_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, PANEL_SIZES, zoomFor, panelBounds, panelBox } = require('./tv-config.js');
 const { createStore } = require('./save-store.js');
 const { createLogger } = require('./log-store.js');
 const { createSaveGuard } = require('./save-guard.js');
@@ -269,7 +269,38 @@ function rememberBounds() {
 /* ------------------------------------------------------------------ *
  * 窗口
  * ------------------------------------------------------------------ */
+/* 电视窗口的唯一创建入口，外面套一道重入闸门。
+ *
+ * createWindow 有两处调用：whenReady 的首次创建，以及 second-instance 里
+ * 发现"没有窗口"时的重建。这两者之间原本没有任何互斥 —— 只要重建请求落在
+ * 首次创建把 win 赋上值之前，旧的那句 `if (win && !win.isDestroyed())` 就挡不住，
+ * 同一个进程里会建出两个窗口：两个都摆在屏幕上，但只有后建的那个被 win 引用，
+ * 先建的那个从此没有任何代码路径能碰到它（连右键菜单都只在它自己身上弹）。
+ *
+ * "之前"不是理论上的缝隙：new BrowserWindow 是同步的，窗口创建本身就要
+ * 几百毫秒到两秒半（见日志里两次「电视窗口已创建」的间隔）。用一个显式标志把
+ * 整段创建圈起来，"同一时刻只有一个电视窗口"才是结构上的事实，而不是时序上的运气。
+ *
+ * try/finally 不能省：中途抛异常而标志没复位，此后就再也建不出窗口了 ——
+ * 那比多一个窗口严重得多。 */
+let creatingWindow = false;
+
 function createWindow() {
+  if (win && !win.isDestroyed()) return win;
+  if (creatingWindow) return null;
+  creatingWindow = true;
+  try {
+    return buildWindow();
+  } finally {
+    creatingWindow = false;
+  }
+}
+
+function buildWindow() {
+  /* 冷启动的时间原点。下面 dom-ready 与 did-finish-load 各记一条相对耗时 ——
+   * "双击之后多久才有东西可看"是这个桌宠唯一会影响体感的启动指标，
+   * 而它只能从这三行日志算出来（见 logInfo('窗口已可见') 那一段的理由）。 */
+  const createAt = Date.now();
   const size = curSize();
   const pos = state.pos
     ? clampToVisible(state.pos.x, state.pos.y, size.w, size.h)
@@ -310,8 +341,13 @@ function createWindow() {
   win = w;
 
   /* 窗口的物理尺寸与缩放系数是"版面看起来对不对"的全部输入，记下来 ——
-   * 玩家截图里画面偏了，第一件事就是比对这一行。 */
+   * 玩家截图里画面偏了，第一件事就是比对这一行。
+   *
+   * pid 与 id 是"到底有几个电视窗口"的唯一判据：同一个进程建了两个窗口时，
+   * 两行的 pid 相同而 id 不同，一眼能认出来。缺了 id，重复建窗只能靠数
+   * 日志行数猜，而"日志里有两行"和"屏幕上真有两个窗口"是两回事。 */
   logInfo('电视窗口已创建', {
+    id: w.id, pid: process.pid,
     size: state.size, w: size.w, h: size.h, x: pos.x, y: pos.y,
     zoom: Number(zoomFor(size.w).toFixed(4)),
     alwaysOnTop: state.alwaysOnTop, hidden: state.hidden,
@@ -319,14 +355,40 @@ function createWindow() {
 
   w.loadFile(ORIGINAL_GAME);
 
+  /* 启动期先刷一层不透明底，让"点了之后什么都没有"变成"一块正在启动的电视框"。
+   *
+   * 这是被实测逼出来的：窗口 transparent + 全透明底色，而抹掉页面底色的
+   * TV_TRANSPARENT_CSS 要等 did-finish-load 才注入；在那之前桌面上没有任何轮廓。
+   * 冷启动本来就要好几秒，用户看不到任何反馈就会再点一次 bat —— 第二次的进程
+   * 会被单实例锁挡掉、静默退出（app.quit() 在 whenReady 之前，不留日志），
+   * 于是现象被描述成"要点两次才能打开"。理由详见 tv-config.js 的 TV_STARTUP_CSS。
+   *
+   * 时机选 dom-ready 而不是更早：这时 document 已经存在，注入一定落在页面自己那份
+   * 文档上，而不是被随后的导航丢掉。它到 did-finish-load 之间正好覆盖"页面还在加载"
+   * 的那几秒 —— 也就是原本完全看不见的那一段。 */
+  w.webContents.on('dom-ready', () => {
+    w.webContents.insertCSS(TV_STARTUP_CSS).catch(() => {});
+    logInfo('窗口已可见（启动底已刷）', {
+      sinceCreateMs: Date.now() - createAt,
+      size: state.size,
+    });
+  });
+
   // 版面锚点：加载完成后把缩放系数定死，视口就恒等于原版的设计尺寸。
   // 注入只补 frameless 窗口缺的拖动把手 + 抹掉页面自己的底色（见 tv-config.js）。
   w.webContents.on('did-finish-load', () => {
     w.webContents.setZoomFactor(zoomFor(size.w));
     w.webContents.insertCSS(TV_DRAG_CSS).catch(() => {});
     /* 电视柜以外的留白透出桌面。**只在电视窗口注入** —— 面板是摆在旁边的
-     * 一块菜单，透出桌面只会让面板里的字压在壁纸上，更难读。 */
+     * 一块菜单，透出桌面只会让面板里的字压在壁纸上，更难读。
+     *
+     * 顺序要紧：它必须晚于上面那条 TV_STARTUP_CSS。两条选择器与 !important
+     * 完全一样，层叠规则在同优先级下判"后插入者胜" —— 反过来就永远是一块
+     * 深色实心矩形，透明效果整个失效。 */
     w.webContents.insertCSS(TV_TRANSPARENT_CSS).catch(() => {});
+    logInfo('画面已加载（启动底已交还给透明）', {
+      sinceCreateMs: Date.now() - createAt,
+    });
   });
   // 右键弹控制菜单：frameless 窗口没有标题栏，总得有个入口
   w.webContents.on('context-menu', () => popupControlMenu(w));
@@ -367,6 +429,8 @@ function createWindow() {
   // 面板窗口开着时跟随主电视位置。
   w.on('moved', placePanel);
   w.on('resize', placePanel);
+
+  return w;
 }
 
 /* 面板窗口。它是个真正的独立窗口，和电视窗口并存；
@@ -422,7 +486,7 @@ function openPanel(key = 'assign') {
     width: ps.w,
     height: ps.h,
     frame: false,
-    /* 面板**故意不透明**（与电视窗口相反，见 createWindow 里的 transparent）。
+    /* 面板**故意不透明**（与电视窗口相反，见 buildWindow 里的 transparent）。
      * 它是一块摆在电视旁边的菜单，字要压在纯色底上才读得清；
      * 它的三个注入里也**没有** TV_TRANSPARENT_CSS。 */
     backgroundColor: '#050a15',
@@ -945,7 +1009,24 @@ process.on('unhandledRejection', (reason) => {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => toggleVisible(false));
+  /* 又点了一次启动脚本：把已有窗口叫回视线，不新开一个。
+   *
+   * 单实例锁会挡掉第二次的那份进程，而那个进程走的是 app.quit()、发生在
+   * whenReady 之前 —— 所以"第二次点击"在日志里连一行都不会留，唯一的动作
+   * 就是这里。曾经只写一句 toggleVisible(false)，结果是：窗口已经显示时
+   * showInactive() 是空操作，玩家点完毫无反馈；窗口还没建出来时（Electron
+   * 引导要 1~2.5s，玩家往往等不到）它会走 createWindow() 重建一个 —— 两条路
+   * 都让"再点一次"显得全靠运气。补一次显式 show + focus，让这个动作确定可见。
+   *
+   * 这里抢焦点是有意的：玩家亲手点了启动，就该让窗口到前面来。
+   * 首次启动仍然走 showInactive，不抢焦点，那条语义不变。 */
+  app.on('second-instance', () => {
+    toggleVisible(false);
+    if (win && !win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
 
   /* 渲染进程真的死掉（不是卡住）比 unresponsive 严重：画面没了，
    * 存档也不再更新，玩家看到的是一块不动的电视。 */

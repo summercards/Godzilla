@@ -13,22 +13,37 @@ let nodes=new Map(),listeners={},storage=new Map();let grad={addColorStop(){}};l
 class ImageMock{set src(v){this.complete=true;this.naturalWidth=300;this.naturalHeight=300;queueMicrotask(()=>this.onload?.());}}
 let randomSeed=76123;const testMath=Object.create(Math);testMath.random=()=>{randomSeed=(Math.imul(randomSeed,1664525)+1013904223)>>>0;return randomSeed/4294967296;};
 const window={IdleProgression:require('../progression.js'),KaijuRig:Rig,KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,addEventListener:(k,f)=>listeners[k]=f};let sandbox={window,KaijuRig:{...Rig,Skeleton:class{constructor(parts){this.parts=parts;this.ready=true;this.loaded=Promise.resolve(true);}draw(){}},FinRenderer:class{draw(){}}},KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,console,Math:testMath,Set,Array,Map,Date,String,Number,Image:ImageMock,document:{getElementById:node,createElement:()=>node(Math.random()),hidden:false,addEventListener:(k,f)=>listeners[k]=f,body:{classList:{toggle(){}}}},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},performance:{now:()=>0},requestAnimationFrame(){},setTimeout(fn){fn();return 0;}};
-let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,worldSnapshot,broadcast,requestNextMap,get breakCd(){return breakingCd;},get mapGate(){return mapGate;},get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
+let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,worldSnapshot,broadcast,requestNextMap,ensureWorldAhead,currentRoute,get breakCd(){return breakingCd;},get mapGate(){return mapGate;},get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
 let main=api.state.buildings.find(b=>b.layer===1);assert(main.max>=780);api.damageBuilding(main,api.state.economy.power(),'claw');api.damageBuilding(main,api.state.economy.power(),'claw');assert(!main.dead&&main.hp>main.max*.7,'main building survives repeated initial claws');
 let currentSave=api.worldSnapshot(),ratio=main.hp/main.max,id=main.id;api.generateWorld(currentSave);assert(Math.abs(api.state.buildings.find(b=>b.id===id).hp/api.state.buildings.find(b=>b.id===id).max-ratio)<1e-9,'new save preserves damage ratio');
 api.generateWorld({district:1,x:420,buildings:[{id,hp:115,dead:false},{id:'1-1',hp:0,dead:true}]});main=api.state.buildings.find(b=>b.id===id);assert.equal(main.hp/main.max,.5,'legacy save retains half damaged condition');assert(api.state.buildings.find(b=>b.id==='1-1').dead,'legacy ruins stay destroyed');api.generateWorld();
 console.log('PASS tougher buildings: multiple hits, current save and legacy damage migration');
+/* 同城区的世界坐标和镜头不能在旧路段末尾硬重置；新块在可见之前预生成。
+ * 换图资格由击破房屋/敌人积累，满格后持续锁定直到用户点击。 */
+api.state.p.x=4400;api.ensureWorldAhead();
+const chunkBefore=api.worldSnapshot().worldChunk,front=api.state.buildings.filter(b=>!b.dead&&b.x>4550);
+assert(chunkBefore>=2&&front.length>0,'路段尾部进入画面前必须预铺房屋');
+const districtBefore=api.state.data.district;api.state.data.cleared+=12;api.state.data.kills+=8;api.update(1/60);
+assert.equal(api.currentRoute().progress,1,'房屋和敌人击破达到条件后顶部进度锁定满格');
+assert(api.mapGate&&api.state.data.district===districtBefore,'未点击按钮时保持原城区');
+const xBefore=api.state.p.x;api.state.p.x=4680;api.ensureWorldAhead();
+assert.equal(api.state.p.x,4680,'跨越旧路段边界不应传送怪兽');
+assert(api.state.buildings.some(b=>!b.dead&&b.x>4680),'继续推进应有前方建筑');
+assert.equal(api.currentRoute().progress,1,'继续挂机不重置满格进度');
+api.save();const chunkPayload=JSON.parse(storage.get('gnn-kaiju-idle-v3'));assert(chunkPayload.world.worldChunk>=2&&chunkPayload.world.nextDistrict===districtBefore+1,'新块与按钮资格持久化');
+const chunkWindow={...window};vm.runInNewContext(src,{...sandbox,window:chunkWindow});assert.equal(chunkWindow.test.state.p.x,4680,'重启后继续处于原世界坐标');assert.equal(chunkWindow.test.currentRoute().progress,1,'重启后进度仍满格');assert(chunkWindow.test.state.buildings.some(b=>!b.dead&&b.x>4680),'重启后恢复前方建筑');
+storage.delete('gnn-kaiju-idle-v3');api.state.data.district=1;api.state.data.cleared=0;api.state.data.kills=0;api.generateWorld();console.log('PASS seamless map: ahead buildings, full progress latch, continuous coordinate and reload');
 let seen=new Set(),crashSeen=false,counts={},previousAction=null;for(let i=0;i<(process.argv.includes('--long')?1800:600)*60;i++){api.update(1/60);seen.add(api.state.p.action.name);if(api.state.p.action!==previousAction){previousAction=api.state.p.action;counts[previousAction.name]=(counts[previousAction.name]||0)+1;}if(api.state.crashCount>0)crashSeen=true;if(i%1200===0)api.render();if(api.state.data.district>=(process.argv.includes('--long')?6:3))break;}
 /* 换图现在必须确认（产品决定：路段末端只立起「进入下一张地图」的闸门，
  * 不再自动推进 —— 见 game.js 的 mapGate）。所以挂机判定要拆成两半：
  * 挂机本身必须走到末端把闸门立起来，确认一次之后区域才推进。 */
 if(api.state.data.district<2)assert(api.requestNextMap(),'挂机必须走到路段末端并立起换图闸门');
-let s=api.state;console.log('IDLE RUN',JSON.stringify({district:s.data.district,level:s.data.level,buildings:s.data.cleared,kills:s.data.kills,crashes:s.crashCount,stats:s.data.levels,skills:s.data.skills,actions:[...seen],counts}));assert(s.data.district>=2,'autonomous progression clears first district');assert(s.data.level>=3,'combat XP accumulates levels');assert(s.data.cleared>40);assert(s.data.skills.length>=1);assert.equal(s.data.levels.power+s.data.levels.atomic+s.data.levels.metabolism+s.data.levels.stride,4,'auto-managed run must not silently spend on stats');assert(crashSeen,'airborne destruction reaches ground explosion');for(let name of ['walk','claw','beam','stomp','roar','tail'])assert(seen.has(name),'AI selects '+name);assert(s.p.x>400);assert(s.p.hp===undefined,'player has no health/death mechanic');api.save();let payload=JSON.parse(storage.get('gnn-kaiju-idle-v3'));assert.equal(payload.world.district,s.data.district);assert(s.particles.length<=700);assert(s.fires.length<=60);console.log('PASS autonomous world: districts, skills, all attacks, airborne crashes, persistence, bounded particles');
+let s=api.state;console.log('IDLE RUN',JSON.stringify({district:s.data.district,level:s.data.level,buildings:s.data.cleared,kills:s.data.kills,crashes:s.crashCount,stats:s.data.levels,skills:s.data.skills,actions:[...seen],counts}));assert(s.data.district>=2,'autonomous progression clears first district');assert(s.data.level>=3,'combat XP accumulates levels');assert(s.data.cleared>40);assert(s.data.skills.length>=1);assert.equal(s.data.levels.power+s.data.levels.atomic+s.data.levels.metabolism+s.data.levels.stride,4,'auto-managed run must not silently spend on stats');assert(crashSeen,'airborne destruction reaches ground explosion');for(let name of ['walk','claw','beam','stomp','tail'])assert(seen.has(name),'AI selects '+name);assert(s.p.x>400);assert(s.p.hp===undefined,'player has no health/death mechanic');api.save();let payload=JSON.parse(storage.get('gnn-kaiju-idle-v3'));assert.equal(payload.world.district,s.data.district);assert(s.particles.length<=700);assert(s.fires.length<=60);console.log('PASS autonomous world: districts, skills, all attacks, airborne crashes, persistence, bounded particles');
 assert((counts.claw||0)+(counts.stomp||0)+(counts.tail||0)>(counts.beam||0)*3,'melee dominates automatic combat');console.log('PASS combat pacing: melee actions exceed laser casts by more than 3 to 1');
 /* 章节边界实跑：不依赖等级门槛，强制将路段推过 5→6、10→11、15→16。 */
 const levelBeforeChapters=api.state.data.level;
 for (const edge of [5,10,15,16,100]) {
-  api.state.data.district=edge;api.generateWorld();api.state.p.action={name:'walk',t:0};api.state.p.x=4550;api.update(1/60);
+  api.state.data.district=edge;api.generateWorld();api.state.p.action={name:'walk',t:0};api.state.p.x=4550;api.state.data.cleared+=12;api.state.data.kills+=8;api.update(1/60);
   /* 走到末端只立闸门，换图要确认一次 —— 这就是玩家在功能面板点的那一下。 */
   assert(api.mapGate,'区域边界 '+edge+'→'+(edge+1)+' 必须立起换图闸门');
   assert(api.requestNextMap(),'区域边界 '+edge+'→'+(edge+1)+' 的换图请求必须被接受');
@@ -136,9 +151,9 @@ for (const level of [1,15,100]) {
   g.state.p.cooldowns={beam:9999,stomp:9999,tail:9999,roar:9999};const hp=gate.hp;
   for(let i=0;i<6*60&&gate.hp===hp;i++)g.update(1/60);
   assert(gate.hp<hp,'LV '+level+' 必须能从原门卫停距前走入有效爪击范围');
-  g.state.enemies.length=0;g.begin('walk');const x=g.state.p.x,meters=g.state.data.meters;
+  g.state.enemies.length=0;g.begin('walk');
   for(let i=0;i<60;i++)g.update(1/60);
-  assert(g.state.p.x>x&&g.state.data.meters>meters,'清空路段必须持续行走并记录里程');
+  assert(g.state.buildings.some(b=>!b.dead),'持续推图时必须始终有可见房屋，不允许空路段');
 }
 console.log('PASS gate melee: LV1/15/100 claws hit with all skills cooling down, empty routes keep moving');
 

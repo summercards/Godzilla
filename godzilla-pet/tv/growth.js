@@ -4,6 +4,7 @@
  * 三条链路在这里各自只有一个出处，改数值只改本文件：
  *
  *   等级 → 体型         BODY    baseScale() / bodyScale()
+ *   等级 → 屏幕表观     VIEW    cameraScale() / apparentScale()（= 体型 × 镜头）
  *   等级 → 体征解锁     GATES   unlocked() / spineCount()
  *   等级 → 战斗数值     COMBAT  districtScale()
  *
@@ -77,6 +78,58 @@
   /** 最终体型系数。渲染层与受击盒都只认这一个值。 */
   function bodyScale(level, talents, morph, epochs) {
     return Math.min(CEIL, baseScale(level, epochs) * growFactor(talents, morph));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 1.5 · 镜头 —— 屏幕表观尺寸（= bodyScale × 镜头）
+   *
+   * 玩家看到的**不是** bodyScale，是 bodyScale 乘镜头。两者分别住在
+   * 两个文件里的时候，"体型在长"和"屏幕上看得见在长"会变成两件事：
+   * 2026-09-18 实测（真实存档 LV11）—— 体型系数 +29.4%，镜头却从
+   * 1.300 反向收到 1.160，屏幕上只有 +15.5%，一级只多 3.8px，
+   * 而且换场时画面还会倒退。当时那条"体型单调增长"的测试是**绿的**。
+   * 所以镜头必须和体型放在同一个文件、同一个断言下。
+   *
+   * 老写法（已删，game.js 的 cameraScale）：
+   *   min( 1.3 − 0.3×clamp((L−1)/24, 0, 1) , 当前场景.camera , 1.16/bodyScale )
+   *     ① 第一项随等级从 1.30 收到 1.00 —— 正好抵消体型增长；
+   *     ② 第二项是场景硬切（1.30 / 1.16 / 1.00），换场瞬间画面倒退
+   *        −2.9%（L8 进郊区）/ −7.3%（L18 进城区）；
+   *     ③ 第三项因 CEIL=1.12 < 1.16 而**永远不是最小值**，从生效过 0 次，
+   *        是死项 —— 它想防的溢出，其实一直是 CEIL 在兜。
+   *
+   * 现写法：镜头**恒定**，体型增长全额落到屏幕上；只在体型大到快顶到
+   * 顶部字幕条时反向收敛。这不是"随等级拉远"，是防溢出保险丝。
+   *
+   * 上限是怎么推出来的（谁改先重算，别拍脑袋）：
+   *   渲染 s = sceneZoom × zoom × 0.8（game.js 的 render）；
+   *   世界点 y 映射到屏幕 (y − G) × s + H × 0.72。
+   *   地面线 H × 0.72 = 518.4px；
+   *   TV 模式的顶部字幕条 .camera-top 在 top:22% = 158.4px，加 18px 字号
+   *   × 1.25 行高 + 标签内边距 ≈ 底边 185px；
+   *   满体型骨骼高 401.2px（rig.js 的 BIND_BOUNDS）。
+   *   故 表观上限 = (518.4 − 185) ÷ (401.2 × 0.8) ≈ 1.038，取 1.02 留余量。
+   *
+   * ⚠️ 这一项**未计入背鳍**：BIND_BOUNDS 是身体轮廓的并集，背鳍由 FinRenderer
+   * 另画（15 级起），顶端还在身体之上。所以 1.02 是"身体不穿"的线，不是
+   * "整只巨兽不穿"的线。定这个值时的安全论据是**相对改动前**：
+   * 改动前表观最大能到 1.015（满级满突变），1.02 只比它高 0.5% ——
+   * 即"不比改动前的满级更糟"。这次真正要救的是中段（L11~L52）：L50 的表观
+   * 从 0.771 提到 1.003。要再收紧，先抓一张满级原生帧量出背鳍顶端再定。
+   *
+   * 注：L50 之后表观趋近上限，怪物相对建筑不再继续变大 —— 那是屏幕物理
+   * 高度决定的，不是曲线被压平。要更长，得先给顶部 UI 让位。
+   * ------------------------------------------------------------------ */
+  const VIEW = { base: 1.30, ceiling: 1.02 };
+
+  /** 镜头系数。渲染层只认这一个值，且必须与 bodyScale 用同一次输入。 */
+  function cameraScale(level, talents, morph, epochs) {
+    return Math.min(VIEW.base, VIEW.ceiling / bodyScale(level, talents, morph, epochs));
+  }
+
+  /** 屏幕表观尺寸。这是"体型看得见"的唯一判据，测试与探针都该量它。 */
+  function apparentScale(level, talents, morph, epochs) {
+    return bodyScale(level, talents, morph, epochs) * cameraScale(level, talents, morph, epochs);
   }
 
   /* ------------------------------------------------------------------ *
@@ -168,8 +221,8 @@
    * ------------------------------------------------------------------ */
 
   const api = {
-    CEIL, GATES, SPINE, COMBAT, DISTRICT,
-    baseScale, growFactor, bodyScale,
+    CEIL, GATES, SPINE, COMBAT, DISTRICT, VIEW,
+    baseScale, growFactor, bodyScale, cameraScale, apparentScale,
     unlocked, spineCount, spineBonus,
     districtScale, levelMult,
   };

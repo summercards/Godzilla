@@ -141,6 +141,46 @@ test('体型：1 级最小、随等级单调增长、封顶 1.12', () => {
   assert.ok(s(50) / s(1) > 1.5, '50 级体型相对 1 级必须明显变大');
 });
 
+/* 屏幕表观尺寸：玩家看到的不是 bodyScale，而是 bodyScale × 镜头。
+ *
+ * 只守上面那条"体型单调增长"是不够的 —— 2026-09-18 实测（主人真实存档 LV11）：
+ * 体型系数 +29.4%，镜头却从 1.300 反向收到 1.160，屏幕上只有 +15.5%，
+ * 一级只多 3.8px；换场处还倒退（L8 −2.9%、L18 −7.3%）。
+ * 那段时间上面那条测试一直是绿的 —— 因为体型本身确实在单调增长。
+ * 所以判据必须是这个乘积，不是 bodyScale。 */
+test('镜头：屏幕表观尺寸逐级单调不减，且与体型同幅增长', () => {
+  const Growth = require('../tv/growth.js');
+  const app = (lv, t, m) => Growth.apparentScale(lv, t || {}, m || {}, P.EPOCHS);
+  let prev = 0;
+  for (let lv = 1; lv <= 300; lv++) {
+    const cur = app(lv);
+    assert.ok(cur >= prev - 1e-9, `屏幕表观在 ${lv} 级倒退了：${prev.toFixed(4)} → ${cur.toFixed(4)}`);
+    assert.ok(cur <= Growth.VIEW.ceiling + 1e-6, `${lv} 级表观 ${cur.toFixed(4)} 越过 ${Growth.VIEW.ceiling} 上限，会顶穿顶部字幕条`);
+    prev = cur;
+  }
+  /* 1→11 级是玩家最容易察觉的一段：体型涨 29%，屏幕不许再被镜头压回 15%。 */
+  assert.ok(app(11) / app(1) > 1.25, `1→11 级屏幕只大了 ${((app(11) / app(1) - 1) * 100).toFixed(1)}%，镜头又在抵消体型`);
+  /* 换场不许留台阶：stageIndexFor 切换的那两级（郊区和城区），表观必须仍然不减。 */
+  for (const [before, after] of [[7, 8], [17, 18]]) {
+    assert.ok(app(after) >= app(before), `L${before}→L${after} 换场时画面倒退了：${app(before).toFixed(4)} → ${app(after).toFixed(4)}`);
+  }
+  /* 体型还小的时候镜头必须恒定 —— "随等级主动拉远"正是老 bug 本体。 */
+  assert.equal(+Growth.cameraScale(1, {}, {}, P.EPOCHS).toFixed(4), 1.3);
+  assert.equal(+Growth.cameraScale(11, {}, {}, P.EPOCHS).toFixed(4), 1.3, '11 级镜头必须仍是 1.30，不许提前缩');
+  /* 上限只在后期防溢出时才触到：50 级之前不许被钳。 */
+  assert.ok(Growth.cameraScale(50, {}, {}, P.EPOCHS) > 1.28, '50 级之前镜头不该开始收敛');
+});
+
+/* 第二份镜头值：场景表不得再带 camera。
+ *
+ * 破了会怎样：镜头出现两个真源（growth.VIEW 与 STAGES[].camera），
+ * 谁生效取决于表达式里谁写在前 —— 而且两条路都不报错。 */
+test('镜头：场景表里没有第二份镜头值', () => {
+  for (const s of P.STAGES) {
+    assert.ok(!('camera' in s), `STAGES.${s.key} 又带上了 camera —— 镜头真源只允许 growth.VIEW`);
+  }
+});
+
 /* 背鳍门禁：15 级之前是"没有这个部件"，不是"画得小"。
  * 突变池也必须同步门禁，否则"随机背鳍变化在 15 级之后"这条承诺落空。 */
 test('背鳍：15 级前为 0，15 级起出现，突变池同样被挡住', () => {
@@ -237,14 +277,14 @@ test('托管：默认开启，旧档没写过 auto 也跟随默认，显式关�
   assert.equal(P.sanitize({ version: 4, level: 5, auto: true }).auto, true);
 });
 
-/* P0-1 的另一半：托管要真的花出去，但加点机会绝不替玩家花。 */
-test('托管：autoSpend 会强化与解锁技能，但绝不替玩家花加点机会', () => {
+/* 托管只负责技能树；属性等级必须由玩家主动强化或 assign 加点，不能偷偷花核能。 */
+test('托管：只解锁技能，不自动强化或消费加点与进化机会', () => {
   const e = new P.Economy({ version: 4, energy: 100000, dna: 100, level: 20, assign: 5 });
   e.data.levels = { power: 1, atomic: 1, metabolism: 1, stride: 1 };
   const sum = () => e.data.levels.power + e.data.levels.atomic + e.data.levels.metabolism + e.data.levels.stride;
   assert.equal(sum(), 4);
   e.autoSpend();
-  assert.ok(sum() > 4, 'autoSpend 必须自动强化');
+  assert.equal(sum(), 4, 'autoSpend 不得自动强化');
   assert.ok(e.data.skills.length > 0, 'autoSpend 必须自动解锁技能');
   assert.equal(e.data.assign, 5, '加点机会必须原样留着 —— 那是留给玩家回来点的仪式感');
 });
