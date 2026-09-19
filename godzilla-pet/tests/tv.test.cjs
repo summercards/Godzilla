@@ -248,12 +248,47 @@ test('档位：缩放系数都小于 1，屏幕上才叫"小窗"', () => {
   assert.equal(zoomFor(VIEWPORT.w), 1, '按视口宽度反推的系数应当正好是 1');
 });
 
-test('注入：外壳可拖、画面可点，两者不能搞反', () => {
+test('注入：电视柜整块可拖，可点的控件一个都不许拖', () => {
   // 先去掉注释再断言，免得说明文字里的词误伤
   const rules = TV_DRAG_CSS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ');
-  assert.match(rules, /body\s*\{[^}]*app-region:\s*drag/, '四周留白（body）应当可拖动');
-  assert.match(rules, /\.shell\s*\{[^}]*app-region:\s*no-drag/, '.shell 必须保持可交互，否则画面里的按钮点不动');
-  assert.match(rules, /header[^{]*\{[^}]*app-region:\s*drag/, '页眉应当作为第二拖动区');
+  /* 拆成规则块逐块读：只对整段做关键词匹配的话，
+   * "某块写了 no-drag" 与 "某控件被写进了 drag 块" 分不出来。 */
+  const blocks = [...rules.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, sel, body]) => ({
+    sel: sel.trim(),
+    val: (/-webkit-app-region:\s*([a-z-]+)/.exec(body) || [])[1] || '',
+  }));
+  const valOf = (sel) => (blocks.find(b => b.sel === sel) || {}).val || '';
+  const noDragSels = blocks.filter(b => b.val === 'no-drag').flatMap(b => b.sel.split(',').map(s => s.trim()));
+  const dragSels = blocks.filter(b => b.val === 'drag').flatMap(b => b.sel.split(',').map(s => s.trim()));
+
+  assert.equal(valOf('body'), 'drag', '四周留白（body）应当可拖动');
+
+  /* 2026-09-18 按反馈放宽：原来这条写的是 no-drag —— 那时只有柜外留白与
+   * 上下两条状态栏能拖，玩家压住画面正中反而拖不动。现在反过来钉住。 */
+  const shellRules = blocks.filter(b => b.sel.endsWith('.shell'));
+  const tvShell = shellRules.find(b => b.sel.includes(':not(.panel-view)'));
+  assert.equal(tvShell && tvShell.val, 'drag', '电视窗口里电视柜（含画面）整块都应当能拖');
+
+  /* 面板窗口必须显式压回不可拖。
+   * 这一条不是"顺手加的"：`-webkit-app-region` 是**继承属性**，面板窗口里
+   * 整页就是 .shell —— 只写电视那条 drag 的话，面板会从 body 继承到 drag，
+   * 滚动区与滚轮一起被吞掉。改动前 `.shell { no-drag }` 是全局规则，
+   * 面板窗口整页本来就是 no-drag，所以旧行为要显式重建。 */
+  const panelShell = shellRules.find(b => b.sel.includes('html.panel-view'));
+  assert.equal(panelShell && panelShell.val, 'no-drag',
+    '面板窗口必须显式 no-drag，否则滚动被拖动区吞掉');
+
+  /* 控件必须逐个挡：祖先一旦是 drag 而又没在控件上声明 no-drag，
+   * 命中测试就按"拖窗口"处理，按钮会点不动 —— 且两端都不报错。 */
+  for (const t of ['button', 'select', 'input', 'label']) {
+    assert.ok(noDragSels.includes(t), '可点控件 ' + t + ' 必须在 no-drag 名单里');
+  }
+  assert.ok(noDragSels.some(s => s.endsWith('.management-screen')),
+    '观测面板要整块保持可交互（内部滚动），且只限电视窗口');
+  for (const t of ['button', 'select', 'input', 'label']) {
+    assert.ok(!dragSels.some(s => s.includes(t)), t + ' 被写进了 drag 块，会点不动');
+  }
+
   // 只要碰了颜色、字号、间距，就说明"不改原版画面"这条被破了
   assert.ok(
     !/color|font|margin|padding|background|border/.test(rules),

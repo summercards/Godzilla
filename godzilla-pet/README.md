@@ -188,9 +188,26 @@ localStorage.setItem('gnn-kaiju-idle-v3', economy.serialize(Date.now(), worldSna
 `tests/tv.test.cjs` 把这些不变式钉住了：只改档位宽度、忘了跟着算高度，
 测试会直接报出来——那正是最容易犯、后果最隐蔽的错。
 
-拖动靠注入一条 `-webkit-app-region` 规则：四周深色留白和上下两条状态栏可拖，
-画面本体保持可交互。这条注入里**没有任何视觉属性**，测试守着它
-（出现 `color` / `font` / `margin` 之类就直接失败）。
+拖动靠注入一条 `-webkit-app-region` 规则：**整个电视柜都能拖** —— 台标条、侧栏、
+画面、页脚，压住哪儿都能拖。能被点到的控件（`button` / `select` / `input` / `label`）
+逐个标成 `no-drag`，遥控器、换台、观测面板里的按钮照旧点得动。
+
+2026-09-18 之前不是这样：那时 `.shell` 是 `no-drag`，能拖的只剩柜外那圈留白
+（左右各 16 视口像素）与上下两条状态栏，等于逼玩家去够两条窄边，压住画面正中
+反而拖不动。
+
+三条不变式各有断言盯着：
+
+- 注入里**不许有任何视觉属性**（出现 `color` / `font` / `margin` 之类直接失败）；
+- 「电视柜可拖、面板窗口不可拖、控件不可拖」由 `tests/tv.test.cjs` 按规则块逐条断言；
+- **控件有没有被拖动区吞掉**由 `build/tv-shot.cjs --tv` 的 `REGION*` 审计实测 ——
+  它沿祖先链回算每个可见控件的有效归属，落到 `drag` 上直接失败。这类故障的现象是
+  "点了没反应"，两端都不报错，只看 CSS 文本是看不出来的。
+
+> 一个必须记住的性质：`-webkit-app-region` 是**继承属性**。面板窗口是同一个页面
+> 另开的一份，整页就是 `.shell` —— 只写"电视柜可拖"的话，面板会顺着继承从 `body`
+> 沾上 `drag`，滚动条与滚轮一起被吞掉。所以 `TV_DRAG_CSS` 里两条都写了：
+> `html:not(.panel-view) .shell { drag }` 与 `html.panel-view .shell { no-drag }`。
 
 ### 电视柜以外透出桌面
 

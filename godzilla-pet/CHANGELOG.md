@@ -1,3 +1,79 @@
+# 2.6.4（未打包）· 拖动区：整个电视柜都能拖
+
+> 状态：**源码已生效，尚未打包**。`package.json` 与 `build/make-app.sh` 仍是
+> `2.6.1 / 27`；本次与同样未打包的 2.6.2 / 2.6.3 会在同一次打包带上。
+> 主人跑的是源码版，**重启桌宠即生效**。
+
+主人反馈：「窗口拖拽，现在只能在上下两边，需要压住整个游戏窗口的地方都能拖拽。」
+
+## 一、原来能拖的只有两条窄边
+
+`TV_DRAG_CSS` 是 `body { drag }` + `.shell { no-drag }` —— 只有**电视柜以外那圈留白**
+能拖。柜子在视口里是 1088×625（视口 1120×736），上下各留 55px、左右各 16px，
+× 0.46 缩放后左右不足 10 屏幕像素；再叠上独立声明过的 `header`（46px 台标条）与
+`footer`（38px 页脚）两条拖动区 —— 能拖的就只剩"上下两条"。压住画面正中，
+也就是这个窗口的主体，一动不动。
+
+| 位置 | 改前 | 改后 |
+| --- | --- | --- |
+| 柜外留白（`body`） | 可拖 | 可拖 |
+| 台标条 / 页脚 | 可拖 | 可拖 |
+| **侧栏 / 画面 / 机身** | **不可拖** | **可拖** |
+
+## 二、改法：柜体整块 drag，可点控件逐个 no-drag
+
+拖动判定按**命中点所在的最近一条显式声明**算：祖先里有一个 `drag`，该范围内没被
+`no-drag` 挡住的像素就都能拖。所以反过来把控件列出来最直接 —— 这份画面里需要
+保留点击的只有 `button` / `select` / `input` / `label` 四类。
+
+## 三、继承属性的坑：面板窗口必须显式压回 no-drag（本次最值钱的一条）
+
+`-webkit-app-region` 是**继承属性**。证据就在审计输出里：`.tv-menu` 自己没声明过
+任何值，而 `REGION` 行读到的是 `dock=drag`（继承自祖先）。
+
+于是"让 `.shell` 可拖"会顺着继承渗进**面板窗口**那份页面 —— 面板窗口整页就是
+`.shell`，被 `drag` 裹住之后滚动条与滚轮都会被吞掉。而改动前 `.shell { no-drag }`
+是**全局**规则，面板窗口整页恰恰是 `no-drag`，所以旧行为必须显式重建：
+
+```css
+html:not(.panel-view) .shell { -webkit-app-region: drag; }    /* 电视：柜体整块可拖 */
+html.panel-view .shell     { -webkit-app-region: no-drag; }  /* 面板：显式压回去 */
+```
+
+`panel-view` 只由 `panel-preload.js` 加在面板窗口的 `documentElement` 上，电视窗口
+永远不带这个类。
+
+## 四、验证：把"点了没反应"变成一条会失败的断言
+
+拖动区的故障现象是**"按钮点了没反应"，两端都不报错** —— 只看 CSS 文本看不出
+"这个控件被拖动区吞掉了"。所以补了两层检查：
+
+| 层 | 位置 | 判据 |
+| --- | --- | --- |
+| 结构 | `tests/tv.test.cjs` | 拆规则块逐条断言：柜体 `drag`、面板 `no-drag`、四类控件 `no-drag`、`management-screen` 只限电视窗口 |
+| 实测 | `build/tv-shot.cjs` 的 `REGION*` 行 | 真窗口注入后沿祖先链回算每个可见控件的有效归属，落在 `drag` 上直接断言失败 |
+
+实测输出（2026-09-18）：
+
+```
+电视窗口  REGION*  controls=2   swallowed=[]  shell=drag  stage=drag  canvas=drag  sidebar=drag  footer=drag  menuBtn=no-drag  panelShell=no-drag
+面板窗口  REGION*  controls=19  swallowed=[]  shell=no-drag  shellDecl=no-drag
+```
+
+配套：`npm test` 133 项 / 125 过 / 0 失败 / 8 项 macOS 跳过。
+
+## 五、已知代价（明确接受）
+
+拖动区**不再把鼠标事件派发给页面**，所以画面本体上的 `pointerdown` 也不再触发。
+电视窗口里画面本体本来没有可点功能，唯一挂着的是音频解锁那一行
+（`document.addEventListener("pointerdown", …audioInit)`）—— 而它只在"没静音"时
+才做事，那种状态必然点过观测面板里的「开启现场声音」（那次点击本身就会解锁），
+所以实际影响为零。新开声音的路仍在：设置页的「开启现场声音」按钮与换台按钮都是
+`no-drag`，照点照用。
+
+右键菜单（`popupControlMenu`）由主进程处理，本次未实测在拖动区上的表现 ——
+托盘菜单是同一批操作的同源入口，若发现右键在柜体上不出菜单，回报即可。
+
 # 2.6.3（未打包）· 推图轨道与关卡前进按钮
 
 > 状态：**源码已生效，尚未打包**。`package.json` 与 `build/make-app.sh` 仍是

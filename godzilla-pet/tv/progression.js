@@ -402,7 +402,11 @@ const EPOCHS = [
   { name: '亚成体', min: 25, scale: [0.58, 0.76], color: '#38573f', fork: true },
   { name: '成体', min: 50, scale: [0.76, 0.90], color: '#4a5a3c', fork: true, elemental: true },
   { name: '完全体', min: 75, scale: [0.90, 1.00], color: '#6b5436', fork: true, elemental: true, texture: true },
-  { name: '灾厄体', min: 100, scale: [1.00, 1.00], color: '#7a4a2c', fork: true, elemental: true, texture: true, aura: true },
+  /* 灾厄体：末档。上限 1.60 是 2026-09-18 主人要的"满级极限翻倍"落地处 ——
+   * 它在 growth.js 的 END_SPAN（60 级）里走完，即 L100=1.00 → L160=1.60，
+   * 之后饱和。改这个数之前先看 growth.js 里 VIEW.ceiling 那张像素对照表：
+   * 体型 1.5692 以上屏幕表观就吃满 2.04，再往上加只会被镜头抵消，画面不变。 */
+  { name: '灾厄体', min: 100, scale: [1.00, 1.60], color: '#7a4a2c', fork: true, elemental: true, texture: true, aura: true },
 ];
 
 const epochIndexFor = (level) => {
@@ -411,8 +415,9 @@ const epochIndexFor = (level) => {
   return i;
 };
 
-/* 体型缩放。锚点是脚底（见 rig.js 的 pose()/scaleRig()），总上限 1.12：
- * 再大就会盖住页眉或底部新闻条。曲线、上限、天赋乘数全部在 growth.js，
+/* 体型缩放。锚点是脚底（见 rig.js 的 pose()/scaleRig()），系数上限 CEIL=2.24
+ * （2026-09-18 随"满级极限翻倍"一起翻倍）。⚠️ 屏幕放不放得下**不归它管**：
+ * 那道线是 growth.VIEW.ceiling，由镜头反向收敛兜住。
  * 本函数只是转发 —— 老实现自带的 1.80 上限与渲染层从来不调用它，是第二套
  * 只好看不好用的公式，已删除。 */
 function globalScaleFor(level, talents, morph) {

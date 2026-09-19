@@ -119,9 +119,13 @@ test('体征期：由等级推导，25/50/75/100 各一个台阶', () => {
   e.data.level = 100; assert.equal(e.epoch().name, '灾厄体');
 });
 
-/* 体型缩放：成长外观的第一组硬约束。1 级要小、随等级看得见地长、封顶 1.12。
- * L1 / L15 / L25 / L50 四个锚点是后续策划案接进来的接口，破了任何一条都要红。 */
-test('体型：1 级最小、随等级单调增长、封顶 1.12', () => {
+/* 体型缩放：成长外观的第一组硬约束。1 级要小、随等级看得见地长、封顶 CEIL。
+ * L1 / L15 / L25 / L50 四个锚点是后续策划案接进来的接口，破了任何一条都要红。
+ * 上限写 Growth.CEIL 而不是抄一个数字 —— 2026-09-18 把 1.12 翻到 2.24 时，
+ * 这里硬编码的 1.12 是唯一会红的地方，抄数字等于每次改上限都要记得改这里。 */
+test('体型：1 级最小、随等级单调增长、封顶 CEIL', () => {
+  const Growth = require('../tv/growth.js');
+  const TOP = Growth.CEIL;
   const s = (lv, t, m) => P.globalScaleFor(lv, t || {}, m || {});
   assert.equal(+s(1).toFixed(4), 0.34, '1 级幼兽体型应当是 0.34');
   assert.equal(+s(15).toFixed(4), 0.48, '15 级体型应当是 0.48');
@@ -131,11 +135,11 @@ test('体型：1 级最小、随等级单调增长、封顶 1.12', () => {
   for (let lv = 1; lv <= 300; lv++) {
     const cur = s(lv);
     assert.ok(cur >= prev - 1e-12, `体型在 ${lv} 级倒退了：${prev} -> ${cur}`);
-    assert.ok(cur <= 1.120001, `体型 ${cur} 越过了 1.12 上限`);
+    assert.ok(cur <= TOP + 1e-6, `体型 ${cur} 越过了 ${TOP} 上限`);
     prev = cur;
   }
   const stacked = s(200, { mass: 3, magma: 3 }, { colossal: 5, extraScale: 1 });
-  assert.ok(stacked <= 1.120001 && stacked > 1.0, `叠满加成的体型 ${stacked} 应当贴在 1.12 上限`);
+  assert.ok(stacked <= TOP + 1e-6 && stacked > 1.0, `叠满加成的体型 ${stacked} 应当贴在 ${TOP} 上限`);
   /* 1 级到 50 级必须长出看得见的量：0.34 -> 0.76 是 2.24 倍。
    * 低于 1.5 倍就说明曲线又被压平了（旧的饱和指数就会这样）。 */
   assert.ok(s(50) / s(1) > 1.5, '50 级体型相对 1 级必须明显变大');
@@ -169,6 +173,26 @@ test('镜头：屏幕表观尺寸逐级单调不减，且与体型同幅增长',
   assert.equal(+Growth.cameraScale(11, {}, {}, P.EPOCHS).toFixed(4), 1.3, '11 级镜头必须仍是 1.30，不许提前缩');
   /* 上限只在后期防溢出时才触到：50 级之前不许被钳。 */
   assert.ok(Growth.cameraScale(50, {}, {}, P.EPOCHS) > 1.28, '50 级之前镜头不该开始收敛');
+});
+
+/* 满级极限尺寸本身。
+ *
+ * 2026-09-18 主人拍板：满级那个"最大尺寸"翻一倍（表观 1.02 → 2.04）。
+ * 代价是他认过的：头顶会出画（读 growth.js 里 VIEW.ceiling 上方那张像素表）。
+ * 所以这两条盯的是**天花板不许自己缩回去**，以及**不许提前焊死** ——
+ * 老代码在 L75 就吃满上限、之后 25 级画面一点不动，主人抱怨的就是这个。 */
+test('镜头：满级表观上限 2.04（旧值两倍），且末档仍有成长段', () => {
+  const Growth = require('../tv/growth.js');
+  assert.equal(Growth.VIEW.ceiling, 2.04, '表观上限被改了 —— 记得同步 growth.js 里的像素对照表');
+  const app = (lv, t, m) => Growth.apparentScale(lv, t || {}, m || {}, P.EPOCHS);
+  assert.ok(Math.abs(app(300) - 2.04) < 1e-6, `练到顶的表观应当吃满 2.04，实际 ${app(300).toFixed(4)}`);
+  /* 前 50 级不许被这次改动带偏：幼兽 / 亚成体 / 成体三档的锚点没动过。 */
+  assert.ok(Math.abs(app(50) - 0.988) < 0.002, `50 级表观 ${app(50).toFixed(4)} 偏离了 0.988，前段曲线被动了`);
+  /* 末档必须有插值段：100 → 130 级还得继续长。卡住这里的是老写法
+   * `if (!next) return hi;`（一进末档就瞬间跳到上限）。 */
+  assert.ok(app(130) > app(100) * 1.05, `100 → 130 级表观几乎没长（${app(100).toFixed(4)} → ${app(130).toFixed(4)}），末档插值段又没了`);
+  /* 曲线终点 = 1.60。UI 归一化靠它（见 game.js 的 drawAssignHologram）。 */
+  assert.equal(Growth.curveTop(P.EPOCHS), 1.60, '成长曲线终点被改了，面板全息图的归一化基准会跟着变');
 });
 
 /* 第二份镜头值：场景表不得再带 camera。

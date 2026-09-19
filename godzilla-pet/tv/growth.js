@@ -16,7 +16,8 @@
  *     原来瞄准点与命中判定都按满体型写死，小体型时子弹全打在空中。
  *
  * ⚠️ 两条硬边界，动之前先读：
- *   ① 总上限 CEIL = 1.12。再大就会盖住页眉或底部新闻条（渲染层约束）。
+ *   ① 屏幕表观上限 VIEW.ceiling = 2.04。会撞画面的是**表观**（体型 × 镜头），
+ *      不是 CEIL —— CEIL 只管体型系数，屏幕放不下由镜头反向收敛兜住。
  *   ② 体型绕**脚底锚点**缩放（见 rig.js 的 pose()/scaleRig()）。
  *      所以受击盒也必须绕同一个锚点缩放，否则小体型一定被打在空中。
  * ------------------------------------------------------------------ */
@@ -36,7 +37,12 @@
    *   亚成体 25 → 50   0.58 → 0.76      L15 = 0.48
    *   成体   50 → 75   0.76 → 0.90      L25 = 0.58
    *   完全体 75 → 100  0.90 → 1.00      L50 = 0.76
-   *   灾厄体 100+      1.00（基础饱和） L100 = 1.00
+   *   灾厄体 100+      1.00 → 1.60      L100 = 1.00，L160 = 1.60（之后饱和）
+   *
+   *   灾厄体这一档 2026-09-18 改过：原来是 [1.00,1.00]，且末档不插值，
+   *   于是一进 100 级体型就焊死。现在末档在 100 → 100+END_SPAN 之间把
+   *   [1.00, 1.60] 走完 —— 主人要"极限继续往上调"，卡住的不是上限不够高，
+   *   是**那一档根本没有插值段**。
    *
    * 为什么改成线性：老公式 0.333 + 0.667×(1-e^(-(L-1)/9)) 在 L15 就到 0.86，
    * 之后基本不动 —— 观感上只有前 15 级在长。线性让每一档都有肉眼可见的成长，
@@ -44,7 +50,15 @@
    *
    * 基础体型到 1.00 封顶，继续长靠天赋 / 突变（grow 因子），总上限 CEIL。
    * ------------------------------------------------------------------ */
-  const CEIL = 1.12;
+  /* 体型系数的总上限。2026-09-18 主人要求"满级那个极限尺寸翻倍"：1.12 → 2.24。
+   * ⚠️ 它不是渲染安全线：屏幕放不放得下由 VIEW.ceiling 兜（镜头反向收敛）。
+   * 真正会撞画面的是表观（= 体型 × 镜头），不是这个数。 */
+  const CEIL = 2.24;
+
+  /* 最后一档的插值跨度（级）。末档没有"下一档 min"可用，老写法直接 return hi，
+   * 于是等级一进末档就瞬间跳到上限、之后再也不长。给末档补一段插值，
+   * lo === hi 的档走这里结果不变，向后兼容。 */
+  const END_SPAN = 60;
 
   function baseScale(level, epochs) {
     const L = Math.max(1, Number(level) || 1);
@@ -56,9 +70,9 @@
     const lo = Number(span[0]) || 1;
     const hi = Number(span[1] == null ? lo : span[1]) || lo;
     const next = epochs[i + 1];
-    /* 最后一档没有"下一档 min"可插值，直接停在区间上限。 */
-    if (!next) return hi;
     const from = Number(cur.min) || 1;
+    /* 最后一档：在 min → min+END_SPAN 之间把区间走完，之后停在上限。 */
+    if (!next) return lo + (hi - lo) * clamp01((L - from) / END_SPAN);
     const to = Number(next.min) || from;
     const t = to > from ? clamp01((L - from) / (to - from)) : 1;
     return lo + (hi - lo) * t;
@@ -78,6 +92,16 @@
   /** 最终体型系数。渲染层与受击盒都只认这一个值。 */
   function bodyScale(level, talents, morph, epochs) {
     return Math.min(CEIL, baseScale(level, epochs) * growFactor(talents, morph));
+  }
+
+  /* 成长曲线（不含天赋 / 突变）的终点体型 = 末档区间上限。
+   * UI 归一化要用它，不能用 CEIL：CEIL 里含天赋与突变那部分，拿它当分母
+   * 会让"裸档满级"只占满框的 71%（1.60 / 2.24），看起来像变小了。 */
+  function curveTop(epochs) {
+    if (!Array.isArray(epochs) || !epochs.length) return 1;
+    const last = epochs[epochs.length - 1];
+    const span = Array.isArray(last.scale) ? last.scale : [1, 1];
+    return Number(span[1] == null ? span[0] : span[1]) || 1;
   }
 
   /* ------------------------------------------------------------------ *
@@ -105,22 +129,26 @@
    *   渲染 s = sceneZoom × zoom × 0.8（game.js 的 render）；
    *   世界点 y 映射到屏幕 (y − G) × s + H × 0.72。
    *   地面线 H × 0.72 = 518.4px；
-   *   TV 模式的顶部字幕条 .camera-top 在 top:22% = 158.4px，加 18px 字号
-   *   × 1.25 行高 + 标签内边距 ≈ 底边 185px；
-   *   满体型骨骼高 401.2px（rig.js 的 BIND_BOUNDS）。
-   *   故 表观上限 = (518.4 − 185) ÷ (401.2 × 0.8) ≈ 1.038，取 1.02 留余量。
+   *   顶部字幕条 .camera-top 在 top:11% ≈ 79px，加字号行高 ≈ 底边 100px
+   *   （旧注释写 top:22% / 底边 185px，是改版前的位置，已按 style.css 实测更正）；
+   *   满体型骨骼高 401.2px（rig.js 的 BIND_BOUNDS，实测 y0=−401.2 / y1=0）。
+   *   故 屏幕高 = 401.2 × 0.8 × 表观 = 320.96 × 表观，
+   *      头顶屏幕 y = 518.4 − 320.96 × 表观。
    *
-   * ⚠️ 这一项**未计入背鳍**：BIND_BOUNDS 是身体轮廓的并集，背鳍由 FinRenderer
-   * 另画（15 级起），顶端还在身体之上。所以 1.02 是"身体不穿"的线，不是
-   * "整只巨兽不穿"的线。定这个值时的安全论据是**相对改动前**：
-   * 改动前表观最大能到 1.015（满级满突变），1.02 只比它高 0.5% ——
-   * 即"不比改动前的满级更糟"。这次真正要救的是中段（L11~L52）：L50 的表观
-   * 从 0.771 提到 1.003。要再收紧，先抓一张满级原生帧量出背鳍顶端再定。
+   *     表观 1.02 → 头顶 y=191   字幕条下方，安全（2026-09-18 之前的旧上限）
+   *     表观 1.30 → 头顶 y=101   刚好贴住字幕条底边，UI 不用让位
+   *     表观 1.60 → 头顶 y=5     齐画面上沿，"整只可见"的物理天花板
+   *     表观 2.04 → 头顶 y=−136  穿出画面上沿 136px
    *
-   * 注：L50 之后表观趋近上限，怪物相对建筑不再继续变大 —— 那是屏幕物理
-   * 高度决定的，不是曲线被压平。要更长，得先给顶部 UI 让位。
+   * ⚠️ 2.04 = 1.02 × 2，是主人 2026-09-18 明确拍板的"极限翻倍"。代价写死在这里：
+   * **满级时头顶出画** —— 画面里只剩腰身以下，背鳍（15 级起另画，顶端比
+   * BIND_BOUNDS 更高）全在上沿之外。这是取舍，不是 bug。
+   * 哪天要收回"整只可见"，只改这一个数：1.60。
+   *
+   * ⚠️ 这一项**未计入背鳍**：BIND_BOUNDS 是身体轮廓的并集，上面的 y 全是
+   * 身体顶端，背鳍还要往上再一截。2.04 的溢出量因此比 136px 更大。
    * ------------------------------------------------------------------ */
-  const VIEW = { base: 1.30, ceiling: 1.02 };
+  const VIEW = { base: 1.30, ceiling: 2.04 };
 
   /** 镜头系数。渲染层只认这一个值，且必须与 bodyScale 用同一次输入。 */
   function cameraScale(level, talents, morph, epochs) {
@@ -222,7 +250,7 @@
 
   const api = {
     CEIL, GATES, SPINE, COMBAT, DISTRICT, VIEW,
-    baseScale, growFactor, bodyScale, cameraScale, apparentScale,
+    baseScale, growFactor, bodyScale, cameraScale, apparentScale, curveTop,
     unlocked, spineCount, spineBonus,
     districtScale, levelMult,
   };

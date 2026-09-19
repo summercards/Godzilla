@@ -235,6 +235,51 @@ if (argv.contract) {
 
   fs.writeFileSync(OUT, (await win.webContents.capturePage()).toPNG());
 
+  /* 拖动区审计（2026-09-18）。
+   *
+   * 为什么要有它：`-webkit-app-region` 只有两个值，写反了的后果不是报错，而是
+   * "按钮点了没反应"。CSS 文本层面的单测只能证明"关键词都在"，证明不了
+   * "这一堆控件里没有一个落在拖动区里"。真正的判据是命中点归属：Chromium 按
+   * 最近一条显式声明算，所以沿祖先链回算就能预演它的结论。
+   *
+   * 两个维度都要看：
+   *   decl 元素**自身**的计算值 —— 直接验"那条规则有没有命中这个窗口"；
+   *   eff  有效归属（沿祖先）—— 验"鼠标压在这儿到底算拖还是算点"。
+   * 现在只看 eff 会漏：面板窗口里 .shell 自身是 none，但 body 是 drag，
+   * 祖先的 drag 照样把它裹进去。 */
+  const dragAudit = argv.tv
+    ? JSON.parse(await win.webContents.executeJavaScript(`(() => {
+        const eff = (el) => {
+          for (let n = el; n; n = n.parentElement) {
+            const v = getComputedStyle(n).webkitAppRegion;
+            if (v && v !== 'none') return v;
+          }
+          return 'auto';
+        };
+        const decl = (el) => el ? getComputedStyle(el).webkitAppRegion : null;
+        const seen = (el) => !!el && el.getClientRects().length > 0;
+        const controls = [...document.querySelectorAll("button, select, input, label")].filter(seen);
+        const swallowed = controls.filter(el => eff(el) === 'drag')
+          .map(el => el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className ? '.' + String(el.className).trim().split(/\s+/).join('.') : ''));
+        const q = (s) => document.querySelector(s);
+        const points = {};
+        for (const [k, s] of Object.entries({ shell: '.shell', stage: '#playerFrame', canvas: '#game',
+                                             sidebar: '.tv-sidebar', footer: 'footer', menuBtn: '#open-assign', chanBtn: '#chan-cycle' })) {
+          points[k] = seen(q(s)) ? eff(q(s)) : 'hidden';
+        }
+        points.btnDecl = decl(q("#open-assign"));
+        points.shellDecl = decl(q('.shell'));
+        /* 面板窗口对照：要验的是"那条规则在面板窗口里到底命中没有"，
+         * 所以看**自身声明值**而不是有效值 —— app-region 会沿祖先继承，
+         * 看有效值的话两边都是 drag（面板窗口的 body 同样是 drag），什么也验不出来。 */
+        document.documentElement.classList.add('panel-view');
+        const panelShell = decl(q('.shell'));
+        document.documentElement.classList.remove('panel-view');
+        document.documentElement.classList.remove('panel-view');
+        return JSON.stringify({ controls: controls.length, swallowed, points, panelShell });
+      })()`))
+    : null;
+
   console.log(
     'WINDOW   ' + W + '×' + H + '  zoom=' + ZOOM.toFixed(4) +
     '  → 视口 ' + probe.innerW + '×' + probe.innerH
@@ -256,6 +301,34 @@ if (argv.contract) {
       'REGION   body=' + r.body + '  shell=' + r.shell + '  header=' + r.header +
       '  footer=' + r.footer + '  dock=' + r.dock
     );
+    const a = dragAudit;
+    const p = a.points;
+    console.log(
+      'REGION*  controls=' + a.controls + '  swallowed=' + JSON.stringify(a.swallowed) +
+      '  shell=' + p.shell + '  stage=' + p.stage + '  canvas=' + p.canvas +
+      '  sidebar=' + p.sidebar + '  footer=' + p.footer +
+      '  menuBtn=' + p.menuBtn + '(decl ' + p.btnDecl + ')' +
+      '  shellDecl=' + p.shellDecl + '  panelShell=' + a.panelShell
+    );
+    const assert = require('node:assert/strict');
+    assert.deepEqual(a.swallowed, [], '有控件落在拖动区里，它会点不动');
+    /* 面板窗口与电视窗口的判据不同，分开断言：
+     * 电视要"画面整块能拖"，面板要"整页都不能被拖动区裹住"（它整页滚动）。
+     * 但"控件不能落在拖动区"两边都成立 —— 现象都是"点了没反应"、两端都不报错。 */
+    if (PANEL) {
+      assert.equal(p.shellDecl, 'no-drag', '面板窗口整页必须保持可交互（滚动、按钮）');
+      assert.equal(a.panelShell, 'no-drag', '面板窗口里 .shell 必须被显式压回 no-drag');
+      console.log('PASS 面板拖动区审计：' + a.controls + ' 个可见控件全部可点、整页不被拖动区裹住');
+    } else {
+      for (const k of ['shell', 'stage', 'canvas', 'sidebar', 'footer']) {
+        assert.equal(p[k], 'drag', k + ' 必须能拖 —— 压住画面任意处都要能拖动窗口');
+      }
+      assert.equal(p.menuBtn, 'no-drag', '遥控器入口必须可点');
+      assert.equal(p.chanBtn, 'no-drag', '换台按钮必须可点');
+      assert.equal(p.shellDecl, 'drag', '电视窗口里 .shell 那条 drag 必须命中');
+      assert.equal(a.panelShell, 'no-drag', '面板窗口那条 no-drag 必须能压过继承来的 drag');
+      console.log('PASS 拖动区审计：柜内整块可拖、' + a.controls + ' 个可见控件全部可点、面板窗口不受影响');
+    }
   }
   console.log('SAVED    ' + OUT);
   console.log('ERRORS   ' + (problems.length ? problems.join(' | ') : 'none'));
