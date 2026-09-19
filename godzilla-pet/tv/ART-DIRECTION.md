@@ -47,3 +47,30 @@
 ## 像素界面
 
 使用本地 Fusion Pixel 12px 简体中文字库，保留硬边窗口、方形按钮、点阵图标与横向新闻滚动。正常窗口与全屏的直播画面都为 16:9。字体来源与许可：[Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)，随包附 `assets/fonts/LICENSE-OFL`。
+# 银曜巨人
+
+关底敌对巨人，银灰装甲、暗红身体纹样、暖黄双眼、青色胸口核心。
+遵循城市敌军的粗颗粒 Canvas 像素风格；运行绘制为 game.js 的 drawSentinel。
+约 404 世界单位高，关节驱动双臂、前臂和双腿；包含呼吸待机、举臂蓄力、射击回弹、受击闪白和 2.4 秒倒地。
+每张地图固定生成一次，击败后才解锁下一地图；旧档已经解锁的出口保持解锁。
+
+## 银曜巨人：ImageGen 母图拆件骨骼版（2026-09-19）
+
+替换最初的 Canvas 方块造型。使用内置图像生成工具，以现有 `godzilla-pixel.png` 为像素质感参考，制作银红色、三分之二侧身朝左的完整角色母图。原始母图保存在 `assets/enemies/army/sentinel/source/sentinel.png`，1024×1536，自带透明通道；保留其原始 alpha，无需按黑色背景抠图。
+
+生成提示词要点：Ultraman-like silver and crimson giant hero as hostile boss; richly modeled shaded 16-bit arcade pixel clusters, dark outlines, dramatic highlights; three-quarter side view facing left; streamlined silver fin helmet, warm almond eyes, cyan chest reactor; athletic proportions; neutral separated limbs suitable for skeletal cutting; transparent backdrop; no text, no block robot. 生成方式：内置 ImageGen；未使用 CLI/API 回退。完整提示词保存在 `docs/sentinel-prompt.txt`。
+
+`build/sentinel-assets.py` 按母图解剖位置分割 10 个不重叠部件：头、躯干、两侧上臂/前臂、大腿/胫足，另取 9 个母图纹理关节补片。分割的原始 RGBA 重组差为 0。裁切坐标与枢轴输出至 `source/parts.json`，运行骨架输出至 `rig.data.js`。生成物不手改；调整分割后重新运行脚本。
+
+`sentinel.js` 用父子坐标变换实时驱动关节，包含呼吸待机、双臂蓄力、射击、受击及屈膝倒地；上下臂分别旋转，枪口坐标从前臂骨骼计算。双腿连接根节点，确保站立攻击脚底不滑动。关节旋转时用原图圆形补片遮住切口。没有用整张立绘平移替代动作。
+
+已接入每关末尾的敌对单位与血量存档。图像资源失败时不会用方块替身冒充成品，加载结果可由 renderer.ready / failures 检查。`build/boss-preview.cjs` 使用独立临时存档，在真实 Electron Canvas 中生成游戏内截图、四动作联系图与 52 帧动画验收图。`tv/tests/sentinel.test.cjs` 校验绑定姿态位置、父子骨段长度、手臂枪口运动、攻击时脚底固定及所有贴图文件。
+
+### 出场与近战演出（2026-09-19）
+
+骨架扩展为 12 个身体部件、11 个纹理关节补片：双脚从胫足继续拆出。深蹲与出拳用双骨骼 IK 保持骨段长度，双脚单独保留水平朝向；绑定姿态仍原样还原母图。
+
+- 出场共 4.3 秒：0–0.65 秒高空预警；0.65–1.5 秒高速下坠；1.5 秒落地触发冲击波、碎石、短扬尘、低音和镜头震动；深蹲停留后缓缓起身，3.25 秒揭示名字，4.3 秒交还战斗。触发距离为 580 世界单位，未触发时隐藏角色。演出期间暂停主角攻击并保护 Boss，保证出场不会被提前击杀打断。
+- 近战共 1.6 秒：收拳预备、下压前探、0.72 秒拳头接触、短停顿、收势。低体型主角对应更深的下压，拳头按主角真实受击盒瞄准。只有拳头接触受击盒才触发受击反馈、0.32 秒硬直、震屏和短慢动作；不另造本游戏不存在的玩家生命值扣血机制。近距离优先两次重拳，间隔一次能量射击。
+- 落地事件与拳击事件按时间跨越阈值触发，帧率变化不重复命中。出场进度随 Boss 血量一起存档；老档已有 Boss 按已出场迁移，已解锁关卡不倒退。
+- `build/boss-performance.cjs` 在隔离存档中运行真实场景，输出 150 帧出场到近战演出和六姿态检查图。测试覆盖出场一次性落地、恢复战斗、近战命中时序、保护窗口、IK 长度及双脚朝向。

@@ -87,6 +87,7 @@
     jet: { faction: 'army', label: '喷气战机', slots: ['fuselage', 'wing', 'canopy'], source: 'procedural', renderer: 'drawJet' },
     drone: { faction: 'army', label: '侦察无人机', slots: ['body', 'rotor', 'camera'], source: 'procedural', renderer: 'drawDrone' },
     walker: { faction: 'army', label: '四足攻城兽', slots: ['leg', 'body', 'core'], source: 'procedural', renderer: 'drawWalker' },
+    sentinel: { faction: 'army', label: '银曜巨人 · 关底 BOSS', slots: ['head', 'torso', 'arm', 'forearm', 'far_arm', 'far_forearm', 'thigh', 'shin', 'far_thigh', 'far_shin', 'foot', 'far_foot'], source: 'imagegen_skeletal', renderer: 'drawSentinel' },
     bunker: { faction: 'army', label: '要塞炮台', slots: ['base', 'turret', 'barrel'], source: 'procedural', renderer: 'drawBunker' },
   };
 
