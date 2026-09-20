@@ -329,7 +329,7 @@ tests/
 ## 开发
 
 ```bash
-npm test                       # 自检，36 项（另有 8 项 app 包测试在非 macOS 上跳过）
+npm test                       # 门禁自检，160 项（其中 8 项 app 包测试在非 macOS 上跳过）
 sh build/make-app.sh           # 生成并安装 .app（改过 main.js 要重装才生效）
 npm run icons                  # 重新生成托盘图标
 python3 build/make-icons.py --preview       # 顺便在终端把图标打成 ASCII 核对
@@ -345,6 +345,16 @@ Electron、`PROJ` 必须是写死的绝对路径、装着的位置错了必须�
 
 > 存档接管那组断言尤其重要：**它失联的时候不会报任何错**，只是进度悄悄写回了
 > localStorage，肉眼完全看不出来。
+
+**什么算「门禁」**：`npm test` 收的是 `tests/*.test.cjs` + `tv/tests/*.test.cjs`
++ `tv/tests/idle.cjs`。最后那个要单独列，因为它是**脚本式用例** —— 77 条断言
+全写在顶层，没有 `test()` 包装，文件名也不带 `.test.`。而同一个目录下的
+`tv/tests/mutation-visual-audit.cjs` 是**零断言的对账报告**，故意不进这道门。
+
+> 之前这里写的是 `tv/tests/*.cjs`，看着更省事，实际把那个报告脚本也扫了进来：
+> `node --test` 对「能跑完但没有 `test()` 的文件」记一条**通过**，于是总数里凭空
+> 多一条没人写的用例，跑测试还顺带打一整张表。收窄成现在这样之后，数字才等于
+> 真实断言数。加新用例请带 `.test.cjs` 后缀 —— 否则它不会进这道门。
 
 `app-bundle.test.cjs` 会真的跑一遍 `make-app.sh` 装到临时目录再检查产物，
 所以它验证的是生成出来的东西，不是源码里有没有某句话。装到临时目录而不是

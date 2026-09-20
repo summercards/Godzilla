@@ -9,7 +9,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron --in-process-gpu --disable-gpu --no-sandbox .",
-    "test": "node --test \"tests/*.test.cjs\" \"tv/tests/*.cjs\"",
+    "test": "node --test \"tests/*.test.cjs\" \"tv/tests/*.test.cjs\" \"tv/tests/idle.cjs\"",
     "assets": "node build/derive-rig.cjs",
     "assets:check": "node build/derive-rig.cjs --check",
     "icons": "python3 build/make-icons.py"

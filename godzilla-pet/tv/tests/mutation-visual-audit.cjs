@@ -3,6 +3,12 @@
  * 逐条 apply 每个突变到空白 morph，记录它到底改了哪些字段，
  * 再按「谁在消费这个字段」给每条突变判定视觉效果是否真的落地。
  *
+ * **不在 `npm test` 的门禁里**：本脚本零断言，只打印一张判定表。
+ * `npm test` 的 glob 是 `tv/tests/*.test.cjs` + `tv/tests/idle.cjs`
+ * （2026-09-20 收窄；此前是 `tv/tests/*.cjs`，会连本文件一起当用例跑 ——
+ *  node 对"没有 test() 的脚本"记 1 条通过，于是凭空多出一条假绿用例，
+ *  每次跑测试还顺带打一整张表）。单独复现：`node tv/tests/mutation-visual-audit.cjs`。
+ *
  * 消费表（改这里必须同时改代码，否则这张表会骗人）：
  *   VISUAL  —— 屏幕上真的会变
  *   READOUT —— 只在全息图/面板文字里出现
