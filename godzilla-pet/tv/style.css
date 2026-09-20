@@ -69,8 +69,11 @@ button:disabled{cursor:default}h1,h2,h3,h4,p{font-weight:400;margin:0}
  * 内边距 → 左组比右组高（实测 38.9 vs 33.1 逻辑像素）→ 而 center 让两块
  * **中心**对齐，左块顶边就比右块高出 (38.9−33.1)/2 = 2.9 逻辑像素。
  * 实心红块的顶边对着旁边一行纯文字，这点差值一眼就是"没对齐"。
- * 顶对齐后两组的盒子顶边都落在 top 那一行（y=108），与推图条同一套版面。 */
-.camera-top{position:absolute;left:2%;right:2%;top:11%;display:flex;align-items:flex-start;justify-content:space-between;
+ *
+ * 纵向位置**不在基础规则里写**（这里原来有一条 `top:11%`，是死值：
+ * 电视侧真正的值在文件末尾那条 `html:not(.panel-view) .camera-top` 里，
+ * 特指度更高，它永远赢）。两处各写一个百分比 = 改一处漏一处，已经删掉。 */
+.camera-top{position:absolute;left:2%;right:2%;display:flex;align-items:flex-start;justify-content:space-between;
   font-size:clamp(8px,1.1cqw,16px);text-shadow:2px 2px #051028;z-index:4;pointer-events:none}
 /* 徽章**不许有竖向 padding**，line-height 收到 1（= 高 18px，等于字号）。
  * 只把容器改成顶对齐是不够的：左块比右块高时，左块自己就是最高的那一项，
@@ -240,9 +243,10 @@ html:not(.panel-view) #management{display:none!important}
  * 这里原本还留着一条孤立的 `.camera-top{top:17%}`，2026-09-20 删掉：
  * 它是死值 —— `.panel-view .camera-top` 已被 display:none（见上），
  * 所以它只可能作用在电视侧，而电视侧真正生效的是文件末尾那条
- * `html:not(.panel-view) .camera-top{top:15%}`（特指度更高）。
+ * `html:not(.panel-view) .camera-top`（特指度更高）。
  * 两处各写一个百分比 = 改一处漏一处，留着只会误导下一个改版面的人。
- * 机位条的纵向位置现在**只有一个真源**：末尾那条。 */
+ * 机位条的纵向位置现在**只有一个真源**：末尾那条。
+ * （同一天晚些时候，基础规则里那条同样躺着的 `top:11%` 也按这个理由删了。） */
 
 /* 观影时副屏打开，战斗继续运行。 */
 .whiteflash{animation:whiteFlash .2s}
@@ -262,7 +266,12 @@ footer{height:38px;margin-top:8px}
 #playerFrame:fullscreen .broadcast{width:min(100vw,calc(100vh*16/9));height:min(100vh,calc(100vw*9/16));aspect-ratio:16/9}
 
 @media(max-width:1050px){.pixel-button{padding:6px 9px}.tv-sidebar{width:120px}.camera-top small,.camera-id{font-size:10px}.camera-top small{margin-left:8px}.live-bug b{font-size:20px}.headline p{font-size:10px}.management-screen{padding:2%}.obs-title{margin-bottom:10px}.obs-tools>span{display:none}.upgrade-card{padding:10px}.upgrade-card h3{font-size:16px}.upgrade-card button{padding:8px 5px;gap:3px}.skill-tree{gap:10px}.skill-node{padding:8px;gap:6px;flex-wrap:wrap}.skill-node button{margin-left:33px}.metric-row>div{padding:8px 12px}#armyIntel{display:none}.tabs button{padding:8px 12px}.event-banner{font-size:16px}.settings-panel h3{font-size:16px}.ticker-time{display:none}}
-@media(max-width:680px){.shell{width:calc(100vw - 16px)}.tv-sidebar{width:96px;padding:8px 6px}.tv-body{gap:7px}.pixel-button.chunky{padding:9px 4px;font-size:13px;min-height:50px}.chan-btn{padding:7px 5px;font-size:11px}.chan-btn>b{width:20px;height:20px}header{height:38px}.network>b{font-size:20px}.network>span{display:none}footer{font-size:10px;height:34px}.camera-top{top:3%;font-size:8px}.camera-top b{padding:2px 4px;margin-right:6px;border-width:1px;font-size:8px;box-shadow:2px 2px #571d36}.camera-top small{display:none}.camera-id{font-size:8px}.tv-menu{gap:6px}.action-caption{bottom:18%;padding-left:5px;border-width:2px}.action-caption>span{font-size:8px}.action-caption small{font-size:8px;margin-top:3px}.lower-third{border-width:1px;height:13%;bottom:7%}.breaking{padding:4px 6px;border-width:1px}.breaking span{font-size:6px;letter-spacing:0}.breaking b{font-size:10px;text-shadow:1px 1px #722034;margin-top:3px}.headline{padding:3px 6px}.headline>span{font-size:6px}.headline h1{font-size:12px}.headline-viewport{margin:2px 0}.headline p{display:none}.live-bug b{font-size:14px}.live-bug>span{font-size:7px;margin-top:2px}.ticker{height:5.5%;border-top-width:1px}.ticker>b{font-size:8px;padding:0 8px;border-right-width:1px}.ticker-track>span{font-size:8px;letter-spacing:0;padding-right:32px}.management-screen{border-width:2px;padding:10px}.section-kicker{font-size:8px}.obs-title h2{font-size:16px;margin-top:3px}.obs-title{margin-bottom:7px}.obs-tools button{font-size:10px}.metric-row{border-width:1px}.metric-row>div{padding:5px 6px;border-right-width:1px}.metric-row small{font-size:8px}.metric-row strong{font-size:16px;margin:3px 0}.metric-row>div>span{font-size:8px}.research-bar{margin:6px 0;border-width:1px}.tabs{gap:3px}.tabs button{font-size:10px;padding:5px 7px;border-width:1px}.tabs button span{display:none}.upgrade-grid{gap:6px;grid-template-columns:1fr 1fr}.upgrade-card{padding:8px;border-width:1px}.upgrade-card p{font-size:10px;min-height:24px}.settings-panel{grid-template-columns:1fr}}
+@media(max-width:680px){.shell{width:calc(100vw - 16px)}.tv-sidebar{width:96px;padding:8px 6px}.tv-body{gap:7px}.pixel-button.chunky{padding:9px 4px;font-size:13px;min-height:50px}.chan-btn{padding:7px 5px;font-size:11px}.chan-btn>b{width:20px;height:20px}header{height:38px}.network>b{font-size:20px}.network>span{display:none}footer{font-size:10px;height:34px}/* 这里原本还有一条 top:3%，2026-09-20 删了：
+   它特指度 0,1,0 低于 html:not(.panel-view) .camera-top 的 0,2,1，
+   而 html 上没有 panel-view 类时那条也命中 —— 所以 3% 在任何场景都算不过，是死值。
+   机位条的纵向位置现在**只有末尾那一个真源**。（下面这条 font-size 留着：
+   它同样被 --tv-label 契约压过去，但那是原作者对紧凑版面的意图，删了没有行为差异。） */
+.camera-top{font-size:8px}.camera-top b{padding:2px 4px;margin-right:6px;border-width:1px;font-size:8px;box-shadow:2px 2px #571d36}.camera-top small{display:none}.camera-id{font-size:8px}.tv-menu{gap:6px}.action-caption{bottom:18%;padding-left:5px;border-width:2px}.action-caption>span{font-size:8px}.action-caption small{font-size:8px;margin-top:3px}.lower-third{border-width:1px;height:13%;bottom:7%}.breaking{padding:4px 6px;border-width:1px}.breaking span{font-size:6px;letter-spacing:0}.breaking b{font-size:10px;text-shadow:1px 1px #722034;margin-top:3px}.headline{padding:3px 6px}.headline>span{font-size:6px}.headline h1{font-size:12px}.headline-viewport{margin:2px 0}.headline p{display:none}.live-bug b{font-size:14px}.live-bug>span{font-size:7px;margin-top:2px}.ticker{height:5.5%;border-top-width:1px}.ticker>b{font-size:8px;padding:0 8px;border-right-width:1px}.ticker-track>span{font-size:8px;letter-spacing:0;padding-right:32px}.management-screen{border-width:2px;padding:10px}.section-kicker{font-size:8px}.obs-title h2{font-size:16px;margin-top:3px}.obs-title{margin-bottom:7px}.obs-tools button{font-size:10px}.metric-row{border-width:1px}.metric-row>div{padding:5px 6px;border-right-width:1px}.metric-row small{font-size:8px}.metric-row strong{font-size:16px;margin:3px 0}.metric-row>div>span{font-size:8px}.research-bar{margin:6px 0;border-width:1px}.tabs{gap:3px}.tabs button{font-size:10px;padding:5px 7px;border-width:1px}.tabs button span{display:none}.upgrade-grid{gap:6px;grid-template-columns:1fr 1fr}.upgrade-card{padding:8px;border-width:1px}.upgrade-card p{font-size:10px;min-height:24px}.settings-panel{grid-template-columns:1fr}}
 @media(max-height:480px) and (orientation:landscape){.shell{width:min(calc(100vw - 10px),calc((100dvh - 20px)*16/9))}header,footer{display:none}.management-screen{padding:10px}.obs-title{margin-bottom:8px}.metric-row>div{padding:5px 8px}.metric-row strong{font-size:16px;margin:3px 0}}
 
 /* TV readability contract: every visible label >= the physical button label.
@@ -272,10 +281,18 @@ html:not(.panel-view) .shell :is(span,small,b,strong,p,h1,i,button,div){font-siz
 html:not(.panel-view) .pixel-button.chunky .pb-tx{font-size:var(--tv-label)}
 html:not(.panel-view) .pixel-button.chunky .pb-ico{font-size:30px}
 html:not(.panel-view) .shell :is(.side-title,.chan-btn,.camera-top,.camera-top small,.camera-id,.action-caption small,.event-banner small,.breaking span,.headline>span,.headline p,.live-bug>span,.ticker-track>span,.ticker-time){font-size:var(--tv-label);line-height:1.25;letter-spacing:0}
-/* 2026-09-20：22% → 15%。推图条同时被压成一条 8px 的进度条并上移到 y=26，
- * 顶部一下子空出一大片，机位条跟着往上收，两者才对得上一套版面。
- * 15% 在 1280×720 逻辑坐标里 = y 108；推图条背板到 y 40，中间留 68px 呼吸。 */
-html:not(.panel-view) .camera-top{top:15%;font-size:18px}
+/* 2026-09-20 晚：15% → **0（贴屏幕最上沿）**。
+ *
+ * 主人看过 15% 那一版之后的原话是「这两个还是在下面啊，没有在屏幕的上方对齐」——
+ * 也就是说上一轮把「向上对齐」理解成「两条互相顶对齐」是**答错了题**：
+ * 主人在意的一直是**纵向位置**，不是两条之间那 2.9px 的内对齐。
+ * 15% 在 1280×720 里是 y=108，落在画面上方 1/7 处，看着就是"悬在半空"。
+ *
+ * top:0 之后行盒占 y 0~22.5（18px 字号 × line-height 1.25），
+ * 推图条背板仍是 y 20~40 —— 行盒底部 2.5px 与背板交叠，但那是行盒的
+ * 透明 leading，**文字墨迹只到 y≈19.2**，横向也只在 x 890~926 这一小段
+ * 与推图条的右端相邻。实测见 .workbuddy/_c3-align.cjs。 */
+html:not(.panel-view) .camera-top{top:0;font-size:18px}
 html:not(.panel-view) .camera-top>span{display:flex;align-items:center;gap:6px}
 html:not(.panel-view) .camera-top b{margin:0}
 html:not(.panel-view) .action-caption{bottom:9%;max-width:68%}

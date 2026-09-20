@@ -940,3 +940,43 @@ test('版面：两侧机位条顶对齐，LIVE 徽章不许撑高左组', () => 
   assert.match(badge, /line-height:1(?:\.0)?(?:;|$)/,
     'LIVE 徽章的 line-height 必须收成 1；默认 22.5px 会让红块比文字行高，顶边对不上右边的文字');
 });
+
+/* 机位条必须**贴屏幕最上沿**（top:0），不是"往上挪一点"。
+ *
+ * 2026-09-20 主人连提两次「向上对齐」，第一轮理解成了"两条互相顶对齐"，
+ * 把 align-items 从 center 改成 flex-start、徽章去掉竖向 padding ——
+ * 但主人看过之后说的还是「这两个还是在下面啊」。**答错题了**：
+ * 主人在意的是**纵向位置**，不是两条之间那 2.9px 的内对齐。
+ * 15% 在 1280×720 里是 y=108，落在画面上方 1/7 处，看着就是"悬在半空"。
+ *
+ * 这条测试钉住两件事，缺一条就会回退：
+ *   ① 电视侧的 top 必须是 0（贴死上沿）；
+ *   ② **除这一条之外，任何地方都不许再给 `.camera-top` 写 top** ——
+ *      那里前后躺过三条死值（`top:17%`、`top:11%`、窄屏断点里的 `top:3%`），
+ *      特指度全都低于 `html:not(.panel-view) .camera-top`，永远算不着。
+ *      只改其中一个数字，量出来一个字节都不会变，是最容易骗过眼睛的一类错。 */
+test('版面：机位条贴屏幕最上沿，且纵向位置只有一个真源', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'tv', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  // ① 电视侧（真正生效的那条）：top 必须是 0
+  const tvRule = css.match(/html:not\(\.panel-view\)\s*\.camera-top\{([^}]*)\}/);
+  assert.ok(tvRule, '找不到 `html:not(.panel-view) .camera-top` 规则 —— 电视侧机位条的纵向位置就在这里');
+  const topDecl = (tvRule[1].match(/top:([^;}]+)/) || [])[1];
+  assert.ok(topDecl, '`html:not(.panel-view) .camera-top` 里没有 top —— 机位条会退回 static 定位流，跑到画面外面去');
+  assert.ok(/^0(px|%)?$/.test(topDecl.trim()),
+    `机位条的 top 必须贴死上沿（写 0），现在是 ${topDecl.trim()} —— ` +
+    '任何非零值都会让它又"悬在半空"，而主人两次反馈要的都是贴到屏幕上方');
+
+  // ② 其它所有给 .camera-top 写 top 的规则块：一律不许（都是算不过的死值）
+  const TOP_DECL = /(?<![-\w])top\s*:/;
+  const offenders = css.split('}')
+    .filter((r) => /\.camera-top\s*\{/.test(r))
+    .filter((r) => !/html:not\(\.panel-view\)/.test(r.split('{')[0]))
+    .map((r) => r.split('{').slice(1).join('{'))
+    .filter((body) => TOP_DECL.test(body))
+    .map((body) => (body.match(/(?<![-\w])top\s*:[^;}]+/) || [''])[0].trim());
+  assert.deepEqual(offenders, [],
+    `除 \`html:not(.panel-view) .camera-top\` 外，还有 ${offenders.length} 处给 .camera-top 写了 top：` +
+    `${JSON.stringify(offenders)} —— 它们的特指度更低、永远算不过那条，是**永远不生效的死值**；` +
+    '机位条的纵向位置只能有**一个真源**，改这种数字只会让人以为改了位置（实测一个字节都不会动）');
+});
