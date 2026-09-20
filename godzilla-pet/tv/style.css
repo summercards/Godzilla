@@ -63,9 +63,24 @@ button:disabled{cursor:default}h1,h2,h3,h4,p{font-weight:400;margin:0}
  * 四条匹配不到元素的空操作（电视页面上的数字改由遥控器的观测面板显示）。
  * .hud-badge 不在此列：它挂在新侧栏「遥控器」按钮上，见下面的按钮样式。 */
 
-.camera-top{position:absolute;left:2%;right:2%;top:11%;display:flex;align-items:center;justify-content:space-between;
+/* align-items 必须是 **flex-start（顶对齐）**，不能用 center。
+ * 2026-09-20 主人反馈「这两个 ui 向上对齐」：两侧是"LIVE 徽章 + 地名"与
+ * "AIR CAM 07 + 时钟"两块。改前左组里的 <b>LIVE 徽章</b>带 padding:2px 竖向
+ * 内边距 → 左组比右组高（实测 38.9 vs 33.1 逻辑像素）→ 而 center 让两块
+ * **中心**对齐，左块顶边就比右块高出 (38.9−33.1)/2 = 2.9 逻辑像素。
+ * 实心红块的顶边对着旁边一行纯文字，这点差值一眼就是"没对齐"。
+ * 顶对齐后两组的盒子顶边都落在 top 那一行（y=108），与推图条同一套版面。 */
+.camera-top{position:absolute;left:2%;right:2%;top:11%;display:flex;align-items:flex-start;justify-content:space-between;
   font-size:clamp(8px,1.1cqw,16px);text-shadow:2px 2px #051028;z-index:4;pointer-events:none}
-.camera-top b{background:var(--red);color:#fff;padding:2px 6px;margin-right:8px;letter-spacing:1px;box-shadow:2px 2px #571d36}
+/* 徽章**不许有竖向 padding**，line-height 收到 1（= 高 18px，等于字号）。
+ * 只把容器改成顶对齐是不够的：左块比右块高时，左块自己就是最高的那一项，
+ * 中心对齐与顶对齐算出来完全相同（左块顶边都等于容器顶边）。真正的开关是
+ * 徽章的竖向 padding —— 它把左组撑高，红块的涂色顶边就比右边那行文字高出去
+ * 一截。收成 18px 之后：红块顶边 111.3、右侧文字墨迹顶边 111.2（DOM 实测，
+ * 差 0.1 逻辑像素）；像素剖面里红块比文字首行高 1 个设备像素 —— 实心块本就
+ * 该略微包住文字，上下各留 1~2px 红边，不贴字。
+ * 横向 padding 保留 6px，不影响竖向对齐。 */
+.camera-top b{background:var(--red);color:#fff;padding:0 6px;line-height:1;margin-right:8px;letter-spacing:1px;box-shadow:2px 2px #571d36}
 .camera-top span{letter-spacing:1px}.camera-top small{margin-left:8px;color:#cdd8e6}.camera-top i{color:#ff5b6b;font-style:normal}
 .camera-id{color:#cdd8e6}
 /* 「地面机位 CAM 02」小窗（.inset / #monitor）的规则 2026-09-20 删除 ——

@@ -903,3 +903,40 @@ test('画面：地面机位小窗（.inset / #monitor）已整条移除', () => 
   // ④ 面板隐藏清单：元素已不存在，留着就是一条匹配不到东西的空操作
   assert.ok(!/\.inset/.test(PANEL_ONLY_CSS), 'PANEL_ONLY_CSS 里还在藏 .inset —— 该类名在 tv/ 里已不存在');
 });
+
+/* 两侧机位条（左「LIVE + 地名」/ 右「AIR CAM 07 + 时钟」）必须**顶对齐**。
+ *
+ * 2026-09-20 主人反馈「这两个 ui 向上对齐」。根因是一条纯 CSS 的相互作用：
+ *   左组里 <b>LIVE 徽章</b>带 `padding:2px` 竖向内边距 → 左组比右组高
+ *   （实测 38.9 vs 33.1 逻辑像素）→ 而 .camera-top 是 align-items:center，
+ *   于是两块**中心**对齐，左块顶边比右块高出 (38.9−33.1)/2 = 2.9 逻辑像素。
+ * 实心红块的顶边对着旁边一行纯文字，这点差值一眼就能看出来是"没对齐"。
+ *
+ * 这条测试钉的是**两条会互相抵消的约束**，缺一条都会回退：
+ *   ① 容器顶对齐 → 两块的上边缘落在同一行；只靠它不够：当左块比右块高时，
+ *      左块自己就是最高项，中心对齐与顶对齐的结果完全相同（都是左块顶边=容器顶边）。
+ *   ② 徽章不许有竖向 padding、line-height 收成 1 → 红块不再把左组撑高，
+ *      它的涂色顶边才真的和右边那行文字的墨迹顶边同线
+ *      （实测 111.3 vs 111.2 逻辑像素，差 0.1）。
+ *
+ * 变异测试：把 align-items 改回 center，或给徽章加回 `padding:2px`，这条必须变红。 */
+test('版面：两侧机位条顶对齐，LIVE 徽章不许撑高左组', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'tv', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const decl = (re) => { const m = css.match(re); return m ? m[1] : null; };
+
+  // ① 容器：顶对齐，不能是 center
+  const top = decl(/\.camera-top\{([^}]*)\}/);
+  assert.ok(top, '找不到 .camera-top 的基础规则');
+  assert.match(top, /align-items:flex-start/, '.camera-top 必须是 align-items:flex-start —— 改回 center 两侧机位条就又变成中心对齐、上边缘不齐了');
+  assert.ok(!/align-items:center/.test(top), '.camera-top 里又出现了 align-items:center');
+
+  // ② 徽章：竖向 padding 必须为 0，行高收成 1（= 高度等于字号）
+  const badge = decl(/\.camera-top b\{([^}]*)\}/);
+  assert.ok(badge, '找不到 .camera-top b 的基础规则');
+  const pad = (badge.match(/padding:([^;}]+)/) || [])[1];
+  assert.ok(pad, 'LIVE 徽章没写 padding —— 横向内边距是它外观的一部分，删掉请先确认');
+  assert.ok(/^0(px)?$/.test(pad.trim().split(/\s+/)[0]),
+    `LIVE 徽章又有了竖向 padding（padding:${pad.trim()}）—— 红块会把左组撑高，涂色顶边又跑到右边文字上面去`);
+  assert.match(badge, /line-height:1(?:\.0)?(?:;|$)/,
+    'LIVE 徽章的 line-height 必须收成 1；默认 22.5px 会让红块比文字行高，顶边对不上右边的文字');
+});
