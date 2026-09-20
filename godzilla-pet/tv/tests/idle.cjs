@@ -13,7 +13,7 @@ let nodes=new Map(),listeners={},storage=new Map();let grad={addColorStop(){}};l
 class ImageMock{set src(v){this.complete=true;this.naturalWidth=300;this.naturalHeight=300;queueMicrotask(()=>this.onload?.());}}
 let randomSeed=76123;const testMath=Object.create(Math);testMath.random=()=>{randomSeed=(Math.imul(randomSeed,1664525)+1013904223)>>>0;return randomSeed/4294967296;};
 const window={SentinelBoss:require('../sentinel.js'),IdleProgression:require('../progression.js'),KaijuRig:Rig,KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,addEventListener:(k,f)=>listeners[k]=f};let sandbox={window,KaijuRig:{...Rig,Skeleton:class{constructor(parts){this.parts=parts;this.ready=true;this.loaded=Promise.resolve(true);}draw(){}},FinRenderer:class{draw(){}}},KaijuAssets:Assets,KaijuAppearance:Appearance,KaijuGrowth:Growth,console,Math:testMath,Set,Array,Map,Date,String,Number,Image:ImageMock,document:{getElementById:node,createElement:()=>node(Math.random()),hidden:false,addEventListener:(k,f)=>listeners[k]=f,body:{classList:{toggle(){}}}},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},performance:{now:()=>0},requestAnimationFrame(){},setTimeout(fn){fn();return 0;}};
-let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,damageEnemy,updateSentinel,worldSnapshot,broadcast,requestNextMap,ensureWorldAhead,currentRoute,bossChallengeAvailable,get bossChallengeStarted(){return bossChallengeStarted;},get breakCd(){return breakingCd;},get mapGate(){return mapGate;},get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
+let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8').replace(/\}\)\(\);\s*$/,`window.test={frame,update,render,save,generateWorld,defeat,crash,begin,damageBuilding,damageEnemy,updateSentinel,worldSnapshot,broadcast,requestNextMap,ensureWorldAhead,currentRoute,bossChallengeAvailable,get bossChallengeStarted(){return bossChallengeStarted;},get breakCd(){return breakingCd;},get state(){return {data,p,buildings,enemies,crashCount,particles,fires,beam,rigState,news,economy};}};})();`);vm.runInNewContext(src,sandbox);let api=window.test;assert.equal(api.state.data.auto,true,'factory default must be auto-managed, otherwise nothing grows while idling');api.state.data.auto=true;
 let main=api.state.buildings.find(b=>b.layer===1);assert(main.max>=780);api.damageBuilding(main,api.state.economy.power(),'claw');api.damageBuilding(main,api.state.economy.power(),'claw');assert(!main.dead&&main.hp>main.max*.7,'main building survives repeated initial claws');
 let currentSave=api.worldSnapshot(),ratio=main.hp/main.max,id=main.id;api.generateWorld(currentSave);assert(Math.abs(api.state.buildings.find(b=>b.id===id).hp/api.state.buildings.find(b=>b.id===id).max-ratio)<1e-9,'new save preserves damage ratio');
 api.generateWorld({district:1,x:420,buildings:[{id,hp:115,dead:false},{id:'1-1',hp:0,dead:true}]});main=api.state.buildings.find(b=>b.id===id);assert.equal(main.hp/main.max,.5,'legacy save retains half damaged condition');assert(api.state.buildings.find(b=>b.id==='1-1').dead,'legacy ruins stay destroyed');api.generateWorld();
@@ -51,6 +51,7 @@ for (const edge of [5,10,15,16,100]) {
   assert.equal(api.requestNextMap(),'challenge','区域边界 '+edge+'→'+(edge+1)+' 必须接受摧毁指令');
   api.defeat(api.state.enemies.find(e=>e.type==='sentinel'),'beam');for(let i=0;i<150;i++)api.update(1/60);
   assert.equal(api.state.data.district,edge+1,'区域边界 '+edge+'→'+(edge+1)+' 必须切换');
+  assert(!api.bossChallengeAvailable(),'进入新区域必须重新走一段才开闸：锁存不许跨区残留，否则按钮永远亮着');
   const route=window.IdleProgression.routeFor(edge+1);
   /* 电视左上只显示城市名 —— 街区名归滚动条，不占主屏（产品决定）。 */
   assert(node('location').textContent.includes(route.chapter.name),'位置必须显示当前城市');
@@ -160,3 +161,67 @@ for (const level of [1,15,100]) {
   assert(g.state.buildings.some(b=>!b.dead),'持续推图时必须始终有可见房屋，不允许空路段');
 }
 console.log('PASS gate melee: LV1/15/100 claws hit with all skills cooling down, empty routes keep moving');
+/* 推图节点闸门：Boss 是不可丢的实体，节点跟着巨兽走（2026-09-19 实机事故回归）。
+ *
+ * 事故现场：主人挂机到 x≈96.7 万（worldChunk 285），固定在 LENGTH−390 的 Boss 先被
+ * "离远了就回收"的过滤清出 enemies，于是 sentinel() 恒空 → 按钮永不亮 → 节点永远到不了
+ * → 巨兽在节点前无限前进。下面每条分别对着一个断点，回退任何一条都会红。 */
+{
+  const boot = (payload) => { storage.set('gnn-kaiju-idle-v3', JSON.stringify(payload)); const w = { ...window }; vm.runInNewContext(src, { ...sandbox, window: w }); return w.test; };
+  const bossOf = (t) => t.state.enemies.find((e) => e.type === 'sentinel');
+  const farWorld = (extra) => ({ district: 27, stage: 'city', x: 967228, worldChunk: 285, ...extra });
+  const farSave = (extra) => ({ ...window.IdleProgression.defaults(), level: 116, district: 27, auto: false, lastSeen: Date.now(), world: farWorld(extra) });
+
+  /* ① 冷启动：巨兽已经远远走过 Boss 点。Boss 必须仍在场、且守在巨兽**前方**的节点上。 */
+  const far = boot(farSave()), farBoss = bossOf(far);
+  assert(farBoss && farBoss.gate, '巨兽挂机走过 Boss 点后冷启动，Boss 被清掉了 —— 推图会永久卡死');
+  assert(farBoss.x > far.state.p.x, 'Boss 没守在巨兽前面的节点上（在身后 ' + Math.round(far.state.p.x - farBoss.x) + 'px）');
+  assert(!far.bossChallengeAvailable(), '还没走到节点，按钮不该亮');
+  assert(far.worldSnapshot().enemies.some((e) => e.id === 'boss-sentinel'), '存档快照丢了 Boss —— 重启之后它不会回来（这次事故就是这么发生的）');
+
+  /* ② 走到节点：按钮亮、文案换、节点红圈与按钮同源。
+   * 按钮的 DOM 状态由 hud() 落笔，而 hud 只在 uiTimer 攒够 0.2s 时跑（12 帧）。
+   * 所以这里必须跑满 15 帧 —— 只跑 10 帧会读到冷启动那一次的旧值，
+   * 断言挂了却和真正的 bug 无关（假红比漏报更浪费时间）。 */
+  far.state.p.x = farBoss.x - 200;
+  for (let i = 0; i < 15; i++) far.update(1 / 60);
+  assert(far.bossChallengeAvailable(), '走到节点必须开放摧毁操作');
+  assert.equal(node('nextMap').disabled, false, '到了节点按钮还是灰的（hud 每 0.2s 落一次笔）');
+  assert.equal(node('nextMap').textContent, '摧毁这块区域', '到了节点按钮文案没换');
+
+  /* ③ 无视节点继续挂机：节点必须跟着前移，Boss 不许被回收，闸门不许灭。
+   * 闸门必须**锁存** —— 只按位置判断的话，按钮每段路只亮 1360px（28% 的时间），
+   * 玩家走开两分钟回来看正好赶上灭的那 49 秒，和"卡在节点前"看起来一样。 */
+  far.state.p.x += 20000;
+  for (let i = 0; i < 15; i++) far.update(1 / 60);
+  const moved = bossOf(far);
+  assert(moved === farBoss, '挂机推进过程中 Boss 被清掉/换掉了');
+  assert(moved.x > far.state.p.x, '走过节点后节点没有跟着前移：推图再也到不了节点');
+  assert(Math.abs(moved.x + 390 - (Math.floor(far.state.p.x / 4800) + 1) * 4800) < 1e-6, '节点不在巨兽当前那一段路的段末');
+  assert(far.bossChallengeAvailable(), '走过节点之后闸门灭掉了：这一整段路只剩 28% 的时间亮着，挂机回来看到的就是"没到节点"');
+  assert.equal(node('nextMap').disabled, false, '锁存之后按钮不该灰回去');
+
+  /* ③b 锁存随存档落盘：巨兽已经到过节点、但还没点按钮就重启，资格不能丢。 */
+  const latched = boot(farSave({ nodeArmed: true }));
+  assert(latched.bossChallengeAvailable(), '锁存状态必须随存档保留：重启后不能把已经到手的摧毁资格弄丢');
+
+  /* ④ 已开战、但 Boss 还没落地时读过档：必须把它拉到巨兽面前。
+   * 否则 bossChallengeStarted 已经是 true（按钮永久禁用）、而 updateSentinel 的接近判据不成立，
+   * 降临演出永远不会开始 = 死档，只能重置。 */
+  const started = boot(farSave({ bossChallengeStarted: true, enemies: [{ id: 'boss-sentinel', hp: 1500, state: 'alive', introDone: false, introStarted: false, introTime: 0 }] }));
+  const armed = bossOf(started);
+  assert(armed && Math.abs(armed.x - started.state.p.x) <= 580, '已开战读过档，Boss 没落到画面外一步之内：点了没反应 = 死档');
+  for (let i = 0; i < Math.ceil((window.SentinelBoss.INTRO.duration + .2) * 60); i++) started.update(1 / 60);
+  assert(armed.introDone === true, '已开战读过档之后，降临演出必须能真的演完');
+
+  /* 契约（源码级）：任何"回收敌人 / 写存档快照"的过滤都必须显式放 Boss 过去。
+   * 光有行为断言不够 —— 这次事故就是新加的那处过滤忘了（行为断言当时全绿）。 */
+  const reclaims = [...src.matchAll(/enemies[=:]\s*enemies\.filter\([^;]*/g)].map((m) => m[0]);
+  assert(reclaims.length >= 4, '回收/快照过滤只匹配到 ' + reclaims.length + ' 处，正则大概失效了');
+  for (const rule of reclaims) assert(rule.includes('bossEntity('), '这处回收/快照过滤没放 Boss 过去：' + rule.slice(0, 70));
+  /* 降临触发的距离判据也只有一份：按下时把 Boss 拉回来（armBossIntro）与演出开始
+   * （updateSentinel）必须用同一个数，分叉就会出现"按下去不在触发范围内、点了没反应"。 */
+  assert(!/Math\.abs\(e\.x-p\.x\)>580/.test(src), 'updateSentinel 里又写回写死的 580 了');
+  assert((src.match(/BOSS_IN_RANGE/g) || []).length >= 3, 'BOSS_IN_RANGE 没被按键与演出两处共用');
+  console.log('PASS push-map node: boss survives idle advance, node rides ahead, armed restore plays the entrance');
+}

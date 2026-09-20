@@ -69,44 +69,68 @@ const PANEL_SIZES = {
 
 /* 原版是给浏览器写的，不认得 frameless 窗口——没有标题栏就没有拖动把手。
  *
- * 2026-09-18 按反馈放宽。此前只有"柜外那圈留白 + 台标条 + 页脚"能拖，
- * 而柜外留白只剩 16~20 视口像素（× 0.46 缩放后不足 10 屏幕像素）——
- * 等于逼玩家去够两条窄边；压住画面正中，也就是这个窗口的主体，反而拖不动。
- * 现在**整个电视柜都是拖动区**：台标条、侧栏、画面、页脚，压住哪儿都能拖。
- * 反过来，能被点到的控件逐个标成 no-drag，保证遥控器、换台、观测面板里的
- * 按钮照旧点得动。
+ * 拖动区落在**三块互不包含的区域**上（2026-09-19 按反馈定稿）：
  *
- * 为什么是"逐个列控件"而不是给某个容器加一条"整块可交互"：拖动判定按
- * **命中点所在的最近一条显式声明**算 —— 祖先里有一个 drag，该范围内没被
- * no-drag 挡住的像素就都能拖；而祖先一旦被声明成 no-drag，它底下就没有
- * drag 可言了。控件正是这份画面里全部需要保留点击的目标，列出来最直接，
- * 不必去猜哪个容器"大概都不可点"。
+ *     上：台标条 .tv-brand      右：大电视 #playerFrame      下：页脚 footer
  *
- * 这条契约有真检查盯着：build/tv-shot.cjs --tv 会对每个可见控件沿祖先链回算
- * 有效归属，任何一个控件落到 drag 上直接断言失败 —— 光看这几行 CSS 是看不出
- * "按钮被拖动区吞掉"的，那种故障现象是"点了没反应"，两端都不报错。
+ * 也就是"上、右、下能拖，左边那块按钮区没有拖拽区"。左侧控制栏
+ * `.tv-sidebar` 整块划出拖动区 —— 它是这台电视唯一的操作面板。
+ *
+ * ⚠️ 为什么不是"整柜可拖 + 侧栏挖个洞"（2026-09-18 那版，已被证伪）：
+ * 把真机窗口起起来、对着若干锚点逐个问系统 WM_NCHITTEST，结论是 ——
+ * **"大祖先 drag + 子级 no-drag 挖洞"这条路在这台 Chromium 上根本不通**：
+ *
+ *   · body 上一旦**出现任何**声明，整窗判定就退化成"全听 body 的"：
+ *     body{drag} ⇒ 侧栏元素也全是 HTCAPTION（挖洞无效，按钮点不动）；
+ *     body{no-drag} ⇒ 连 #playerFrame 的 drag 也一起失效。
+ *   · 同理，`.shell{drag}` 时作为它**兄弟**的 .tv-sidebar 也挡不住（同样 HTCAPTION）。
+ *
+ * 所以 body 与 .shell 在这份 CSS 里**一个字都不许写**，拖动区只能落在
+ * 三块平级区域上 —— 那条"侧栏可点 + 上右下能拖"的判据，只有这个形状满足。
+ * （实测脚本与逐锚点结论见 `.workbuddy/probe-region-run.py`，2026-09-19。
+ * 注意 CSS 文本层面的断言证明不了这件事：命中测试在 browser 进程的
+ * NonClientHitTest 层判定，必须真开窗口问系统。）
+ *
+ * 代价（已知，接受）：柜外那圈留白（左右各 16 视口像素、上下各 78px）不再是
+ * 拖动区 —— 它不属于这三块里的任何一块。三块本身已覆盖这个窗口的绝大部分，
+ * 不值得为那圈边再引入一层透明覆盖层（那又要碰版面，且还没验过）。
+ *
+ * 能被点到的控件仍然逐个标 no-drag：遥控器、换台、观测面板里的按钮照旧点得动。
  *
  * html:not(.panel-view) 这个前缀必须有：面板窗口（同一个 tv 页面另开的一份）
  * 也注入这份 CSS，而它整页是纵向滚动的菜单，`.shell` 一旦整块变 drag，
  * 滚轮就没用了。panel-view 只由 panel-preload.js 加在面板窗口的
  * documentElement 上，电视窗口永远不带这个类。
  *
+ * 这条契约有两层检查盯着：tests/tv.test.cjs 逐条断规则块（含"body/.shell 必须
+ * 声明为空"），build/tv-shot.cjs --tv 沿祖先链回算每个可见控件的有效归属。
+ *
  * 只动 app-region，一个视觉属性都不带（有断言盯着）。 */
 const TV_DRAG_CSS = `
-  /* 柜外那圈留白 */
-  body { -webkit-app-region: drag; }
-  /* 电视：整个柜子都能拖 —— 台标条 / 侧栏 / 画面 / 页脚，压住哪儿都能拖 */
-  html:not(.panel-view) .shell { -webkit-app-region: drag; }
+  /* 上：台标条 */
+  html:not(.panel-view) .tv-brand { -webkit-app-region: drag; }
+  /* 右：大电视 —— 画面、底部滚动条、藏在里面的观测面板都在这块里 */
+  html:not(.panel-view) #playerFrame { -webkit-app-region: drag; }
+  /* 下：页脚 */
+  footer { -webkit-app-region: drag; }
+  /* ⚠️ body 与电视窗口的 .shell 必须**一个字都不写**。
+     见上面那段实测：它们一有声明，上面三条就不再各自生效，侧栏立刻失守。
+     tests/tv.test.cjs 有两条断言专门钉这个"空"。 */
   /* 面板：显式压回不可拖。它是同一张页面另开的一份，整页纵向滚动、按钮密集，
      被拖动区裹住之后滚动与滚轮都会被吞掉；面板照旧只靠标题栏拖
-     （PANEL_ONLY_CSS 给 .obs-title 单开了 drag）。
-     这一条不能省：app-region 是继承属性，.shell 一旦在别处变成 drag，
-     面板窗口会顺着继承沾上，而不是"没声明就不变"。 */
+     （PANEL_ONLY_CSS 给 .obs-title 单开了 drag）。 */
   html.panel-view .shell { -webkit-app-region: no-drag; }
-  /* 台标条与页脚（含义上属于柜体，写出来是为了让"哪里能拖"一眼可读） */
-  header, footer { -webkit-app-region: drag; }
   /* 能被点到的控件不能拖，否则它们点不动 */
   button, select, input, label { -webkit-app-region: no-drag; }
+  /* 左侧控制栏**整块**不可拖。2026-09-19 按反馈收紧。
+     此前只按标签挡了 button，侧栏自己还留着大片可拖区：组间距、小标题
+     （.side-title 是 span）、底下的旋钮装饰、按钮四周的 padding。
+     手指按按钮时压到边缘外十几像素就从"点"变成"拖窗口"，
+     按钮的 :active（下沉 3px）拿不住 —— 表现出来是"按下去不暗，
+     或者亮了不弹回来"，而窗口会跟着手走一小段，两端都不报错。
+     侧栏是这台电视唯一的操作面板，整块让出来最省事：以后往侧栏加控件
+     不用再记着补声明，也不用去猜哪个容器"大概都点不到"。 */
+  html:not(.panel-view) .tv-sidebar { -webkit-app-region: no-drag; }
   /* 安全网：电视窗口里的观测面板恒为隐藏（tv/game.js 的 guardMainPanel），
      将来若真摊开，它整块要保持可交互（内部有纵向滚动） */
   html:not(.panel-view) .management-screen { -webkit-app-region: no-drag; }

@@ -248,7 +248,7 @@ test('档位：缩放系数都小于 1，屏幕上才叫"小窗"', () => {
   assert.equal(zoomFor(VIEWPORT.w), 1, '按视口宽度反推的系数应当正好是 1');
 });
 
-test('注入：电视柜整块可拖，可点的控件一个都不许拖', () => {
+test('注入：上/右/下三块可拖、左侧按钮区整块不可拖，可点的控件一个都不许拖', () => {
   // 先去掉注释再断言，免得说明文字里的词误伤
   const rules = TV_DRAG_CSS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ');
   /* 拆成规则块逐块读：只对整段做关键词匹配的话，
@@ -261,19 +261,46 @@ test('注入：电视柜整块可拖，可点的控件一个都不许拖', () =>
   const noDragSels = blocks.filter(b => b.val === 'no-drag').flatMap(b => b.sel.split(',').map(s => s.trim()));
   const dragSels = blocks.filter(b => b.val === 'drag').flatMap(b => b.sel.split(',').map(s => s.trim()));
 
-  assert.equal(valOf('body'), 'drag', '四周留白（body）应当可拖动');
+  /* ⚠️ body 与电视窗口的 .shell 都必须**声明为空**。
+   *
+   * 2026-09-18 那版是 body{drag} + .shell{drag} + 侧栏 no-drag 挖洞 —— 看起来
+   * 天经地义，实测却完全不成立。把真机窗口起起来逐个锚点问系统 WM_NCHITTEST：
+   * body 上一旦出现任何声明，整窗判定就退化成"全听 body 的" ——
+   *   body{drag}    ⇒ 侧栏元素照样是 HTCAPTION（挖洞无效，按钮点不动）；
+   *   body{no-drag} ⇒ 连 #playerFrame 的 drag 也一起失效；
+   *   .shell{drag}  ⇒ 作为它兄弟的 .tv-sidebar 同样挡不住。
+   * 所以"大祖先 drag + 子级 no-drag 挖洞"这条路走不通，拖动区只能落在
+   * **互不包含**的几块上。
+   *
+   * 这两条钉的就是这个"空"：谁哪天顺手把 body 的 drag 加回来（它看起来最自然），
+   * 侧栏会立刻静默失守 —— 现象是"按钮点了没反应"，两端都不报错。 */
+  assert.equal(valOf('body'), '', 'body 不许声明 app-region：一写整窗就退化成"全听 body 的"');
+  assert.ok(
+    !blocks.some(b => b.sel.split(',').map(s => s.trim()).includes('body')),
+    'body 又被写进了某条规则的选择器列表里 —— 它会吞掉整个窗口的拖动判定，侧栏失守',
+  );
+  const shellRules = blocks.filter(b =>
+    b.sel.split(',').map(s => s.trim()).some(s => s.endsWith('.shell')));
+  assert.ok(
+    !shellRules.some(b => b.sel.includes(':not(.panel-view)')),
+    '电视窗口的 .shell 不许整块 drag —— 它一 drag，作为兄弟的左侧控制栏就跟着被拖走',
+  );
 
-  /* 2026-09-18 按反馈放宽：原来这条写的是 no-drag —— 那时只有柜外留白与
-   * 上下两条状态栏能拖，玩家压住画面正中反而拖不动。现在反过来钉住。 */
-  const shellRules = blocks.filter(b => b.sel.endsWith('.shell'));
-  const tvShell = shellRules.find(b => b.sel.includes(':not(.panel-view)'));
-  assert.equal(tvShell && tvShell.val, 'drag', '电视窗口里电视柜（含画面）整块都应当能拖');
+  /* 拖动区必须**恰好**是这三块：上（台标条）、右（大电视）、下（页脚）。
+   * 多一块就是把操作区拖进了拖动区；少一块就有玩家抓不到的地方。 */
+  const norm = (s) => s.replace(/^html:not\(\.panel-view\)\s*/, '').trim();
+  assert.deepEqual(
+    [...new Set(dragSels.map(norm))].sort(),
+    ['#playerFrame', '.tv-brand', 'footer'],
+    '电视窗口的拖动区必须恰好是台标条 / 大电视 / 页脚三块',
+  );
 
   /* 面板窗口必须显式压回不可拖。
-   * 这一条不是"顺手加的"：`-webkit-app-region` 是**继承属性**，面板窗口里
-   * 整页就是 .shell —— 只写电视那条 drag 的话，面板会从 body 继承到 drag，
-   * 滚动区与滚轮一起被吞掉。改动前 `.shell { no-drag }` 是全局规则，
-   * 面板窗口整页本来就是 no-drag，所以旧行为要显式重建。 */
+   * 这一条是**保底**：`-webkit-app-region` 是继承属性，面板窗口整页就是 .shell，
+   * 哪天有人给 .shell 或 body 加回一条 drag（见上面那段实测为什么不许加），
+   * 面板会顺着继承沾上，滚动区与滚轮一起被吞掉，而面板里全是纵向滚动的列表。
+   * 历史：改动前 `.shell { no-drag }` 是全局规则，面板整页本来就是 no-drag，
+   * 所以旧行为要靠这条显式重建。 */
   const panelShell = shellRules.find(b => b.sel.includes('html.panel-view'));
   assert.equal(panelShell && panelShell.val, 'no-drag',
     '面板窗口必须显式 no-drag，否则滚动被拖动区吞掉');
@@ -285,6 +312,20 @@ test('注入：电视柜整块可拖，可点的控件一个都不许拖', () =>
   }
   assert.ok(noDragSels.some(s => s.endsWith('.management-screen')),
     '观测面板要整块保持可交互（内部滚动），且只限电视窗口');
+  /* 左侧控制栏必须**整块**声明 no-drag，不许只靠上面那条 button 标签级顶着。
+   * 2026-09-19 反馈的现象：只挡 button 时，侧栏的组间距、小标题（span）、
+   * 旋钮装饰、按钮四周仍留在拖动区里 —— 按按钮时手偏十几像素就从"点"
+   * 变成"拖窗口"，按钮的 :active（下沉 3px）拿不住，
+   * 表现为"按下去不暗 / 亮了不弹回来"，而窗口会跟着手走一小段，两端都不报错。 */
+  const sidebarRule = blocks.find(b => b.sel.includes('.tv-sidebar'));
+  assert.equal(
+    sidebarRule && sidebarRule.val, 'no-drag',
+    '左侧控制栏必须整块 no-drag，否则拖动区会吞掉按钮点击',
+  );
+  assert.ok(
+    sidebarRule.sel.includes(':not(.panel-view)'),
+    '侧栏那条 no-drag 必须只作用于电视窗口：面板窗口里 .tv-sidebar 是隐藏的，不该被它牵连',
+  );
   for (const t of ['button', 'select', 'input', 'label']) {
     assert.ok(!dragSels.some(s => s.includes(t)), t + ' 被写进了 drag 块，会点不动');
   }

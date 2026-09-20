@@ -188,26 +188,36 @@ localStorage.setItem('gnn-kaiju-idle-v3', economy.serialize(Date.now(), worldSna
 `tests/tv.test.cjs` 把这些不变式钉住了：只改档位宽度、忘了跟着算高度，
 测试会直接报出来——那正是最容易犯、后果最隐蔽的错。
 
-拖动靠注入一条 `-webkit-app-region` 规则：**整个电视柜都能拖** —— 台标条、侧栏、
-画面、页脚，压住哪儿都能拖。能被点到的控件（`button` / `select` / `input` / `label`）
-逐个标成 `no-drag`，遥控器、换台、观测面板里的按钮照旧点得动。
+拖动靠注入一条 `-webkit-app-region` 规则：**拖动区恰好是三块** —— 上（台标条
+`.tv-brand`）、右（大电视 `#playerFrame`，含画面）、下（页脚 `footer`）；左侧控制栏
+`.tv-sidebar`（遥控器 + 换台两个按钮）**整块没有拖拽区**。能被点到的控件
+（`button` / `select` / `input` / `label`）另标成 `no-drag`，观测面板里的按钮照旧点得动。
 
 2026-09-18 之前不是这样：那时 `.shell` 是 `no-drag`，能拖的只剩柜外那圈留白
-（左右各 16 视口像素）与上下两条状态栏，等于逼玩家去够两条窄边，压住画面正中
-反而拖不动。
+与上下两条状态栏，等于逼玩家去够两条窄边，压住画面正中反而拖不动。
+2026-09-18 改成"整柜可拖 + 侧栏挖个洞"，结果**两个按钮点不动了** —— 见下面那条实测。
+
+> ⚠️ 这条是拿真窗口问系统问出来的，不是推断：**"大祖先 drag + 子级 no-drag 挖洞"
+> 在这台 Chromium 上不成立**。把真机窗口起起来对若干锚点逐个问 WM_NCHITTEST，
+> 结果是 `body` 上一旦出现任何声明，整窗判定就退化成"全听 body 的"（`body{drag}`
+> 时侧栏也是 HTCAPTION，`body{no-drag}` 时连画面的 drag 也失效）；`.shell{drag}`
+> 时作为它**兄弟**的侧栏同样挡不住。
+> 所以 `TV_DRAG_CSS` 里 **`body` 与 `.shell` 一个字都不许写**，拖动区只能落在三块
+> **互不包含**的区域上。现象是"按钮点了没反应"，两端不报错 —— 光读 CSS 看不出来。
 
 三条不变式各有断言盯着：
 
 - 注入里**不许有任何视觉属性**（出现 `color` / `font` / `margin` 之类直接失败）；
-- 「电视柜可拖、面板窗口不可拖、控件不可拖」由 `tests/tv.test.cjs` 按规则块逐条断言；
+- 「恰好这三块能拖、`body`/`.shell` 声明为空、侧栏与控件不可拖、面板窗口不可拖」
+  由 `tests/tv.test.cjs` 按规则块逐条断言；
 - **控件有没有被拖动区吞掉**由 `build/tv-shot.cjs --tv` 的 `REGION*` 审计实测 ——
   它沿祖先链回算每个可见控件的有效归属，落到 `drag` 上直接失败。这类故障的现象是
   "点了没反应"，两端都不报错，只看 CSS 文本是看不出来的。
 
-> 一个必须记住的性质：`-webkit-app-region` 是**继承属性**。面板窗口是同一个页面
-> 另开的一份，整页就是 `.shell` —— 只写"电视柜可拖"的话，面板会顺着继承从 `body`
-> 沾上 `drag`，滚动条与滚轮一起被吞掉。所以 `TV_DRAG_CSS` 里两条都写了：
-> `html:not(.panel-view) .shell { drag }` 与 `html.panel-view .shell { no-drag }`。
+> 一个必须记住的性质：`-webkit-app-region` 是**继承属性**，而面板窗口是同一个页面
+> 另开的一份，整页就是 `.shell`。所以面板那条 `html.panel-view .shell { no-drag }`
+> 是保底：哪天有人给 `body` / `.shell` 加回一条 `drag`，面板会顺着继承沾上，
+> 滚动条与滚轮一起被吞掉。
 
 ### 电视柜以外透出桌面
 

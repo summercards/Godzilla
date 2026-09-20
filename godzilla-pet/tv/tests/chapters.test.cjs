@@ -134,7 +134,7 @@ test('三城拥有不同天空时段与天气表现，且天气绘制读取章�
 test('路线条与节点同线，填充跟着当前节点走，章末出口在最后一个区接管', () => {
   const draw = (district, progress, gate) => {
     const r = P.routeFor(district, progress), texts = [], rects = [];
-    const env = { currentRoute: () => r, mapGate: gate, ctx: { save() {}, restore() {} },
+    const env = { currentRoute: () => r, bossChallengeAvailable: () => gate, ctx: { save() {}, restore() {} },
       rect: (...a) => rects.push(a), text: (...a) => texts.push(a) };
     vm.runInNewContext(functionSource('drawCampaignRoute', 'render') + ';drawCampaignRoute();', env);
     // 轨道各段统一高 3（改前那条是 4），节点方块 14×14，开闸红圈 20×20
@@ -187,7 +187,7 @@ test('路线条与节点同线，填充跟着当前节点走，章末出口在�
  * "进入 第一章 · 大阪" —— 和"我已经在大阪"自相矛盾，玩家读到的就是"推图卡住了"。
  * 现在跨章才点名章节，章内点名下一区街道。 */
 test('关卡前进按钮文案：章内点名下一区街道，跨章才点名章节', () => {
-  const fn = functionSource('nextMapLabel', 'announceMapGate');
+  const fn = functionSource('nextMapLabel', 'appendWorldChunk');
   assert.ok(fn.includes('nextMapLabel'), 'game.js 里找不到 nextMapLabel');
   const label = (target, from) => vm.runInNewContext(fn + ';nextMapLabel(' + target + ',' + from + ')', { P });
 

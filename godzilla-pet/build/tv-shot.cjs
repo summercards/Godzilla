@@ -245,8 +245,13 @@ if (argv.contract) {
    * 两个维度都要看：
    *   decl 元素**自身**的计算值 —— 直接验"那条规则有没有命中这个窗口"；
    *   eff  有效归属（沿祖先）—— 验"鼠标压在这儿到底算拖还是算点"。
-   * 现在只看 eff 会漏：面板窗口里 .shell 自身是 none，但 body 是 drag，
-   * 祖先的 drag 照样把它裹进去。 */
+   * 现在只看 eff 会漏：面板窗口里 .shell 自身是 none，但祖先的 drag 照样把它裹进去。
+   *
+   * ⚠️ eff 只有一种情形下与系统的真实判定一致（2026-09-19 实测 WM_NCHITTEST）：
+   * **body 上没有 app-region 声明**。body 一旦有声明，整窗判定就退化成"全听
+   * body 的"（body{drag} 时子级 no-drag 挖洞无效，body{no-drag} 时子级 drag
+   * 也失效）。所以下面电视窗口那组期望值里，shell 是 'auto'（哪里都没声明）
+   * 而不是 'drag' —— 拖动区只落台标条 / 大电视 / 页脚三块。 */
   const dragAudit = argv.tv
     ? JSON.parse(await win.webContents.executeJavaScript(`(() => {
         const eff = (el) => {
@@ -320,14 +325,21 @@ if (argv.contract) {
       assert.equal(a.panelShell, 'no-drag', '面板窗口里 .shell 必须被显式压回 no-drag');
       console.log('PASS 面板拖动区审计：' + a.controls + ' 个可见控件全部可点、整页不被拖动区裹住');
     } else {
-      for (const k of ['shell', 'stage', 'canvas', 'sidebar', 'footer']) {
-        assert.equal(p[k], 'drag', k + ' 必须能拖 —— 压住画面任意处都要能拖动窗口');
+      /* 电视窗口：拖动区恰好是台标条 / 大电视（含画面）/ 页脚三块。
+       * #playerFrame 与它里面的 #game 都要是 drag；侧栏与两个按钮必须 no-drag。 */
+      for (const k of ['stage', 'canvas', 'footer']) {
+        assert.equal(p[k], 'drag', k + ' 必须能拖 —— 上/右/下三块是唯二的拖动区');
       }
+      assert.equal(p.sidebar, 'no-drag', '左侧控制栏整块不可拖');
       assert.equal(p.menuBtn, 'no-drag', '遥控器入口必须可点');
       assert.equal(p.chanBtn, 'no-drag', '换台按钮必须可点');
-      assert.equal(p.shellDecl, 'drag', '电视窗口里 .shell 那条 drag 必须命中');
+      /* 柜体自身与 body 都不许有声明（实测：一有声明整窗就退化成"全听 body 的"），
+       * 所以 .shell 的有效归属是 'auto'、自身声明是 undefined。
+       * 这一条就是"谁再把 body/.shell 加回 drag"的拦网。 */
+      assert.equal(p.shell, 'auto', '电视柜自身不是拖动区 —— 它一 drag，左侧控制栏会跟着被拖走');
+      assert.ok(!p.shellDecl || p.shellDecl === 'none', '电视窗口的 .shell 不许声明 app-region');
       assert.equal(a.panelShell, 'no-drag', '面板窗口那条 no-drag 必须能压过继承来的 drag');
-      console.log('PASS 拖动区审计：柜内整块可拖、' + a.controls + ' 个可见控件全部可点、面板窗口不受影响');
+      console.log('PASS 拖动区审计：上/右/下三块可拖、' + a.controls + ' 个可见控件全部可点、左侧控制栏与面板窗口不受影响');
     }
   }
   console.log('SAVED    ' + OUT);

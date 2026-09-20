@@ -1,4 +1,119 @@
+# 2.6.5（未打包）· 火焰锁在 25 级 + 拖动区收成"上/右/下"三块
+
+> 状态：**源码已生效，尚未打包**。`package.json` 与 `build/make-app.sh` 仍是
+> `2.6.1 / 27`，2.6.2 / 2.6.3 / 2.6.4 也在同一批里。主人跑的是源码版，
+> **重启桌宠即生效**（`main.js` 直接 `loadFile` 源码，不复制不改写）。
+>
+> ⚠️ 本条**推翻 2.6.4 的拖动区结论** —— 那一版让遥控器与换台两个按钮点不动了。
+> 下面第四节记的是"错法怎么错的"，落地形状以本条为准。
+
+主人两条反馈：
+
+1. 「火焰还是跟着怪兽放大了。参考 25 级满 1 倍的大小，锁死，不能再大。」
+2. 「简单直接一点，拖拽区就放在上下和右边大电视区域，左边那块按钮区没有拖拽区就好了。」
+
+## 一、火焰 / 烟尘：锁在 25 级那一刻，不再跟体型走到底
+
+改前是 `clamp(bodyScale() * (1+jitter), .25, 1.25)` —— 上限 1.25 与体型上限
+`growth.CEIL = 2.24` 其实还是同一条曲线，怪越长火越大，只是封顶低了点。
+改后把**上限本身**变成"25 级那一刻的体型"，从 `EPOCHS` 推，不写数字：
+
+| 等级 | 裸档体型 `bodyScale` | 改前火焰缩放 | 改后火焰缩放 |
+| --- | --- | --- | --- |
+| 1 | 0.34 | 0.34 | 0.34 |
+| 15 | 0.48 | 0.48 | 0.48 |
+| **25** | **0.58** | **0.58** | **0.58**（基准，一字不动） |
+| 50 | 0.76 | 0.76 | **0.58** |
+| 100 | 1.00 | 1.00 | **0.58** |
+| 160 + 满天赋突变 | 2.24 | 1.25 | **0.58** |
+
+```js
+const FX_LOCK_LEVEL = P.EPOCHS[1].min;                              // 25 = 亚成体起点 = 满 1 倍
+const FX_SCALE_MAX  = Growth.bodyScale(FX_LOCK_LEVEL, null, null, P.EPOCHS);   // 0.58
+function fxScale(jitter){ return clamp(Math.min(bodyScale(), FX_SCALE_MAX) * (1+(jitter||0)), .25, FX_SCALE_MAX); }
+```
+
+三点必须记住：
+
+- 25 级以下照旧跟着缩小（小巨兽配小火），**25 级那一刻的取值与改前完全相同** ——
+  这正是"参考 25 级锁死"的字面意思，不是把火整体缩小。
+- 上限取**裸档**（不带天赋/突变）的大小。这是一条封顶线，不该随玩家加了多少突变往上飘。
+- `render` 的火焰与 `update` 的烟尘**只走 `fxScale()` 这一个出口**（原来是两处
+  各写一份 `clamp(...)`）。改一个漏一个就是"火小了烟还大"——所以抽成函数，
+  并让测试钉住"没有第二处 `clamp(bodyScale()*…)`"。
+
+## 二、拖动区：只落三块互不包含的区域
+
+| 位置 | 2.6.4（错） | 本条（对） |
+| --- | --- | --- |
+| 台标条 `.tv-brand` | 可拖 | **可拖** |
+| 大电视 `#playerFrame`（含画面） | 可拖 | **可拖** |
+| 页脚 `footer` | 可拖 | **可拖** |
+| 左侧控制栏 `.tv-sidebar`（遥控器 / 换台） | 挖洞 `no-drag`（**无效**） | **整块不在拖动区里** |
+| 电视柜 `.shell` / `body` | `drag` | **一个字都不写** |
+
+```css
+html:not(.panel-view) .tv-brand    { -webkit-app-region: drag; }
+html:not(.panel-view) #playerFrame { -webkit-app-region: drag; }
+footer                             { -webkit-app-region: drag; }
+/* body 与 .shell 必须留空 —— 见第三节 */
+button, select, input, label                     { -webkit-app-region: no-drag; }
+html:not(.panel-view) .tv-sidebar                { -webkit-app-region: no-drag; }
+html:not(.panel-view) .management-screen         { -webkit-app-region: no-drag; }
+html.panel-view .shell                           { -webkit-app-region: no-drag; }
+```
+
+## 三、为什么 2.6.4 的"整柜可拖 + 挖洞"根本不成立（本次最值钱的一条）
+
+真机窗口起起来，对若干锚点逐个问系统 `WM_NCHITTEST`（`.workbuddy/probe-region-run.py`），
+逐一试了四种形状：
+
+| 形状 | 侧栏元素（遥控器 / 换台） | 画面 / 台标 / 页脚 | 判定 |
+| --- | --- | --- | --- |
+| `body{drag}` + `.shell{drag}` + 侧栏 `no-drag`（= 2.6.4） | 全 HTCAPTION ✗ | HTCAPTION ✓ | 不满足 |
+| 去掉 `body` 声明，留 `.shell{drag}` | 全 HTCAPTION ✗ | HTCAPTION ✓ | 不满足 |
+| `body{no-drag}` + 三块 `drag` | HTCLIENT ✓ | **也全 HTCLIENT ✗** | 不满足 |
+| **`body` / `.shell` 留空，`drag` 只落三块** | **全 HTCLIENT ✓** | **HTCAPTION ✓** | **采用** |
+
+结论：**`body` 上一旦出现任何声明，整窗判定就退化成"全听 body 的"** —— 挖洞无效
+（`body{drag}`），连子级的 `drag` 也一起失效（`body{no-drag}`）。另外 `.shell{drag}`
+时，作为它**兄弟**的 `.tv-sidebar` 同样挡不住。所以"大祖先 drag + 子级 no-drag 挖洞"
+这条路在这台 Chromium 上不通，**拖动区只能落在互不包含的几块上**。
+
+顺带一条仪器教训：矩阵探针早期给出"5 种配置全 0/9 可点"，是探针自己的坑（锁屏时
+`SendInput` 的真实鼠标不被派发、`GetForegroundWindow()` 返回 0），不是结论。
+`WM_NCHITTEST` 不需要输入派发，是锁屏下唯一可靠的判据 —— 两者已在可交互环境下对过一次。
+
+## 四、验证
+
+```
+电视窗口  REGION   body=none  shell=none  header=drag  footer=drag  dock=no-drag
+电视窗口  REGION*  controls=2   swallowed=[]  shell=auto  stage=drag  canvas=drag
+                   sidebar=no-drag  footer=drag  menuBtn=no-drag(decl no-drag)  shellDecl=none
+面板窗口  REGION*  controls=19  swallowed=[]  shell=no-drag  shellDecl=no-drag  panelShell=no-drag
+```
+
+- 结构层：`tests/tv.test.cjs` 改成"恰好这三块是 `drag`、`body` 与电视 `.shell`
+  声明必须为空、侧栏/控件/面板不可拖"；
+- 实测层：`build/tv-shot.cjs --tv` 的 `REGION*`（`swallowed=[]` 表示没有一个可见控件
+  落在拖动区里）；该工具里"`eff` 只有 body 无声明的形状才与系统判定一致"这条也写进注释了；
+- 火焰：`tests/growth-system.test.cjs` 钉住"上限由 `EPOCHS` 推出、不是裸数字"、
+  "1→160 级逐档只涨到 25 级、之后一格不动"、"两处粒子共用 `fxScale()`"。
+
+`npm test`：141 项 / 133 过 / 0 失败 / 8 项跳过（macOS 专属）。
+
+## 五、已知代价（明确接受）
+
+- **柜外那圈留白不再是拖动区**（左右各 16 视口像素、上下各 78px）。它不属于那三块里的
+  任何一块，而挖洞方案已证伪。三块本身覆盖窗口的绝大部分，抓哪儿都拖得动。
+- 拖动区上的 `pointerdown` 不再派发给页面 —— 与 2.6.4 同，画面本体没有可点功能，
+  唯一那一行音频解锁只在未静音时做事，实际影响为零。
+
 # 2.6.4（未打包）· 拖动区：整个电视柜都能拖
+
+> ⚠️ **已被 2.6.5 推翻**：本节的做法（`.shell` 整块 `drag` + 侧栏 `no-drag` 挖洞）
+> 实测不成立，遥控器与换台两个按钮点不动。留着只为记录"错法是怎么错的"，
+> 落地形状见 2.6.5。
 
 > 状态：**源码已生效，尚未打包**。`package.json` 与 `build/make-app.sh` 仍是
 > `2.6.1 / 27`；本次与同样未打包的 2.6.2 / 2.6.3 会在同一次打包带上。

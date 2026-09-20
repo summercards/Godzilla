@@ -428,3 +428,64 @@ test('体征门槛：消费侧引用的门槛名全部已在 GATES 登记', () =
   }
   assert.ok(used.has('spines'), '背鳍门槛必须仍在被消费，否则这条测试失去意义');
 });
+
+/* 火焰 / 烟尘的缩放必须**锁在 25 级那一刻的大小**，并与体型上限解耦。
+ *
+ * 经过：2026-09-18 把满级体型上限从 1.12 提到 2.24，粒子跟着放到了 2.4 倍，
+ * 满级拆楼整屏都是火、巨兽反被糊掉；09-19 先压回 1.25，反馈仍不对 ——
+ * 判据是"参考 25 级满 1 倍的大小，锁死，不能再大"（25 级 = 亚成体起点 = 满 1 倍）。
+ *
+ * 破了会怎样：谁再动 growth.CEIL 或换个上限数字，火焰会跟着悄悄涨 ——
+ * 画面糊了但测试全绿。 */
+test('火焰：缩放锁在 25 级（满 1 倍），两处粒子共用 fxScale 一个出口', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const Growth = require('../tv/growth.js');
+  const P = require('../tv/progression.js');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'tv', 'game.js'), 'utf8');
+
+  /* 基准点 = 25 级 = 亚成体的起点。EPOCHS 换档位时这条会先响。 */
+  const lock = P.EPOCHS[1].min;
+  assert.equal(lock, 25, 'EPOCHS 第二档（亚成体）的起点必须是 25 级 —— 火焰锁定以它为基准');
+  const ref = Growth.bodyScale(lock, null, null, P.EPOCHS);
+  assert.ok(Math.abs(ref - 0.58) < 1e-9, `25 级裸档体型应为 0.58，实际 ${ref}`);
+  assert.ok(ref < Growth.CEIL, `25 级基准 ${ref} 必须低于体型上限 ${Growth.CEIL}`);
+
+  /* 上限必须是**推导**出来的，不是拍的数字：出处是 EPOCHS + Growth.bodyScale。 */
+  const lockDecl = src.match(/FX_LOCK_LEVEL\s*=\s*([^;\n]+);/);
+  assert.ok(lockDecl, '找不到 FX_LOCK_LEVEL —— 火焰锁定的等级必须显式成一条声明');
+  assert.ok(/EPOCHS/.test(lockDecl[1]),
+    `FX_LOCK_LEVEL 必须从 progression 的 EPOCHS 推出来，不许拍数字（现在是 ${lockDecl[1].trim()}）`);
+  const decl = src.match(/FX_SCALE_MAX\s*=\s*([^;\n]+);/);
+  assert.ok(decl, 'tv/game.js 里找不到 FX_SCALE_MAX 的声明 —— 火焰缩放上限这个约定被删了');
+  assert.ok(/Growth\.bodyScale\(/.test(decl[1]),
+    `FX_SCALE_MAX 必须由 Growth.bodyScale 推出，不许是裸数字（现在是 ${decl[1].trim()}）`);
+  assert.ok(!/^\s*[\d.]+\s*$/.test(decl[1]),
+    `FX_SCALE_MAX 又被写成裸数字（${decl[1].trim()}），它会跟体型一起漂`);
+
+  /* 行为判据（与 game.js 里 fxScale 的表达式同形：min(bodyScale(), 上限)）：
+   * 逐档验"只涨到 25 级、之后一格不动"。上面的源码断言保证这个镜像不会失真。 */
+  let prev = 0;
+  for (const level of [1, 5, 10, 15, 25, 26, 40, 50, 75, 100, 160]) {
+    const fx = Math.min(Growth.bodyScale(level, null, null, P.EPOCHS), ref);
+    assert.ok(fx >= prev - 1e-9, `第 ${level} 级的火焰缩放比上一档还小，画面会缩水`);
+    prev = fx;
+  }
+  assert.equal(prev, ref, '满级火焰缩放必须正好停在 25 级基准上，不许再大');
+  /* 满级（含天赋予突变）的体型远大于基准 —— 否则这条"锁"没有意义。 */
+  const atCap = Growth.bodyScale(160, { mass: 60 }, { colossal: 60 }, P.EPOCHS);
+  assert.ok(atCap > ref, '满级体型必须大于 25 级基准，否则这条锁没有意义');
+  assert.ok(atCap >= Growth.CEIL - 1e-9, `满级体型应当顶到 CEIL ${Growth.CEIL}，实际 ${atCap}`);
+
+  /* 两处粒子（render 的火焰 / update 的烟尘）都必须走 fxScale() 这一个出口，
+   * 不许各写一份 clamp —— 改一个漏一个就是"火小了烟还大"这种对不上的画面。 */
+  const uses = [...src.matchAll(/fxScale\(\s*f\.jitter\s*\)/g)].length;
+  assert.equal(uses, 2, `应当有 2 处粒子缩放调用 fxScale(f.jitter)，实际 ${uses} 处`);
+  const bypass = [...src.matchAll(/clamp\(\s*bodyScale\(\)\s*\*/g)].length;
+  assert.equal(bypass, 0, '有人绕开 fxScale() 直接拿 bodyScale() 算粒子缩放 —— 火焰又会跟着体型长');
+  /* 出口本身必须夹住上限（而不是把 bodyScale 直通出去），且上限就是那个常量。 */
+  const fn = src.match(/function fxScale\([^)]*\)\s*\{([^}]*)\}/);
+  assert.ok(fn, '找不到 fxScale() —— 粒子缩放的唯一出口没了');
+  assert.ok(/Math\.min\(\s*bodyScale\(\)\s*,\s*FX_SCALE_MAX\s*\)/.test(fn[1]),
+    `fxScale() 必须夹 min(bodyScale(), FX_SCALE_MAX)，现在是 ${fn[1].trim()}`);
+});

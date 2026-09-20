@@ -3,6 +3,21 @@
 const $=id=>document.getElementById(id),canvas=$('game'),out=canvas.getContext('2d'),monitor=$('monitor').getContext('2d'),channelCanvas=$('channel'),channelCtx=channelCanvas.getContext('2d');
 const buffer=document.createElement('canvas');buffer.width=640;buffer.height=360;const ctx=buffer.getContext('2d');ctx.imageSmoothingEnabled=out.imageSmoothingEnabled=monitor.imageSmoothingEnabled=false;
 const W=1280,H=720,G=590,LENGTH=4800,SAVE='gnn-kaiju-idle-v3',P=window.IdleProgression;
+/* 火焰 / 烟尘的体型缩放 —— 跟着体型走，但**锁在 25 级那一刻的大小**。
+ *
+ * 25 级 = 亚成体的起点（progression.js 的 EPOCHS 第二档），也就是"满 1 倍"
+ * 的基准点。25 级以下照旧跟体型一起缩小（小巨兽配小火），一到 25 级封顶，
+ * 再往上不长：裸档满级体型 1.60、叠满天赋予突变到 CEIL 2.24，火都不跟着。
+ *
+ * 为什么是"锁"而不是随手给个上限：
+ *   2026-09-18 把体型上限从 1.12 提到 2.24 之后，粒子跟着放到 2.4 倍，
+ *   满级拆楼整屏都是火、巨兽反被糊掉；09-19 先压到 1.25，反馈仍不对 ——
+ *   要的是"参考 25 级满 1 倍的大小，锁死，不能再大"。
+ * 所以基准不再拍数字，直接由 EPOCHS 推（= baseScale(25) = 0.58）：
+ * 上限与体型上限是**两件事**，谁再动 growth.CEIL，这里一动都不动。
+ *
+ * 唯一出口是下面的 fxScale()：render 的火焰与 update 的烟尘都调它，
+ * 别再各写一份 clamp —— 改一个漏一个就是"火小了烟还大"这种对不上的画面。 */
 /* 存档进出的唯一出口。桌宠外壳用 contextBridge 把它接到文件上
  * （tv-preload.js / panel-preload.js 暴露的 __tvBridge.storage）；
  * 桥不在时 —— 直接用浏览器打开本页、或 build/tv-shot.cjs 那种不挂 preload
@@ -13,6 +28,12 @@ const SAVEIO=(window.__tvBridge&&window.__tvBridge.storage)||localStorage;
 /* 资产位置与形态框架。ASSETS 提供路径与单位/建筑清单，Appearance 提供三轴解析。
  * 加载顺序见 index.html；两侧都是 UMD，Node 测试里由沙箱注入。 */
 const ASSETS=window.KaijuAssets,Appearance=window.KaijuAppearance,Growth=window.KaijuGrowth;
+/* 火焰 / 烟尘的缩放上限 = 25 级（亚成体起点，即"满 1 倍"）那一刻的体型。
+ * 从 EPOCHS 推，不写数字；取的是**裸档**（不带天赋/突变）的大小 ——
+ * 这是一条封顶线，主人要的是"锁死，不能再大"，不该随玩家加了多少突变往上飘。
+ * 放在这一行是因为它要读 Growth 与 P，两者在上面刚就位。说明见文件开头。 */
+const FX_LOCK_LEVEL=P.EPOCHS[1].min;
+const FX_SCALE_MAX=Growth.bodyScale(FX_LOCK_LEVEL,null,null,P.EPOCHS);
 const sentinelRenderer=new window.SentinelBoss.Renderer(Image);
 let storageOK=true,raw=null;try{raw=JSON.parse(SAVEIO.getItem(SAVE)||'null');}catch{storageOK=false;}
 const pageSearch=window.location?.search||'';
@@ -62,13 +83,49 @@ function mapProgress(){return bossChallengeAvailable()?1:Math.min(1,Math.min(1,M
 function currentRoute(){return P.routeFor(data.district,mapProgress());}
 function chapterLocation(){return currentChapter().title+' · '+currentRoute().street.name;}
 function cityTitle(){return currentChapter().title;}
-let mapGate=null;
-/* Boss 不再自动出现。走到旧 Boss 出场距离时，仅开放「摧毁这块区域」；
- * 按下后才把 Boss 的降临演出交给 updateSentinel。 */
+/* Boss 不再自动出现：走到节点时只开放「摧毁这块区域」，按下之后才把降临演出交给 updateSentinel。
+ *
+ * 节点**不是世界里的固定坐标**：地图是无限延伸的（区块流式，见 doc/游戏逻辑梳理.md 3.4），
+ * 巨兽会一直往前走，写死的坐标必然被甩在身后。2026-09-19 的实机事故就是这么来的 ——
+ * Boss 站在 LENGTH−390，主人挂机到 x≈96.7 万，它先被"离远了就回收"的过滤清出 enemies，
+ * 于是 sentinel() 恒为空 → 按钮永不亮 → 节点永远到不了 → 巨兽在节点前无限前进。
+ *
+ * 现在的口径：每 LENGTH 是一段路（同 §3.1「一张地图的基准长度」），Boss 守在段末往回 NODE_GUARD；
+ * 巨兽走到 NODE_APPROACH 之内就是"到了节点"，没按按钮继续往前走就换下一段 ——
+ * 节点永远在巨兽前方，推图可以一直进行下去。下面这四个数只写这一份。 */
+const NODE_GUARD=390,NODE_APPROACH=970,NODE_LEAD=520,BOSS_IN_RANGE=580;
+function nodeAnchorX(){return (Math.floor(Math.max(0,p.x)/LENGTH)+1)*LENGTH-NODE_GUARD;}
+/* Boss 是唯一**没有重生机制**的实体：任何"离远了就回收"的过滤、以及存档快照，都必须放它过去。
+ * 漏一处就是永久丢 Boss（上面那次事故的直接原因），所以这个判断只写在这里一份。 */
+const bossEntity=e=>e.type==='sentinel';
 let bossChallengeStarted=false;
-const BOSS_APPROACH_X=LENGTH-970;
-function sentinel(){return enemies.find(e=>e.type==='sentinel'&&e.gate);}
-function bossChallengeAvailable(){const e=sentinel();return !!(e&&alive(e)&&!bossChallengeStarted&&p.x>=BOSS_APPROACH_X);}
+/* 节点闸门**锁存**：巨兽一旦走到节点（NODE_APPROACH 之内），「摧毁这块区域」就永久开放，
+ * 直到真的点下去（或该区被摧毁后重置）。
+ *
+ * 为什么必须锁存：只按位置判断的话，按钮每段路只亮后面 1360px（NODE_APPROACH 之内），
+ * 即 4800px 的一个周期里只亮 28% 的时间。按 119 级约 70px/s 的步速就是亮 19 秒、
+ * 灭 49 秒 —— 玩家离开两分钟回来看，大概率正赶上灭着的那 49 秒，
+ * 看到的和"卡在节点前、按钮不亮"一模一样。改动前是 `p.x>=3830` 的绝对判断，
+ * 过了第一次就恒亮，这里把那个手感还回来。
+ * nodeArmed 随存档落盘：点按钮之前重启，不该把已经到手的资格弄丢。 */
+let nodeArmed=false;
+function nodeReached(){return p.x>=nodeAnchorX()-NODE_APPROACH;}
+function sentinel(){return enemies.find(e=>bossEntity(e)&&e.gate);}
+function bossChallengeAvailable(){const e=sentinel();return !!(e&&alive(e)&&!bossChallengeStarted&&(nodeArmed||nodeReached()));}
+/* 每帧调用：把"到过节点"这件事记下来。与 bossChallengeAvailable() 里的 nodeReached()
+ * 是同一判据的两条入口 —— 前者负责锁存，后者负责锁存之前的那一帧也认得出来
+ * （测试会直接摆坐标再立刻问，不能要求先跑一帧）。 */
+function armNodeGate(){if(!nodeArmed&&!bossChallengeStarted&&nodeReached())nodeArmed=true;}
+/* 让 Boss 站到「从画面外跳进来」的起点：它守在节点上，而巨兽可能已经走过节点一段路
+ * （地图无限延伸）。走远了 updateSentinel 的 BOSS_IN_RANGE 判据就不成立、降临演出永远不开始，
+ * 玩家看到的只是"点了没反应"。 */
+function armBossIntro(e){if(e&&alive(e)&&e.introDone===false&&Math.abs(e.x-p.x)>BOSS_IN_RANGE)e.x=p.x+NODE_LEAD;}
+/* 把 Boss 钉在它守的那一段路的段末（未开战时）。旧档里它丢过或落在身后，这一句同时负责自愈。 */
+function syncBossPost(){
+  const e=sentinel();if(!e||!alive(e))return;
+  if(bossChallengeStarted){armBossIntro(e);return;}
+  const x=nodeAnchorX();if(e.x!==x)e.x=x;if(!Number.isFinite(e.y))e.y=G-180;
+}
 let mapStartCleared=Number.isFinite(data.world?.mapStartCleared)?data.world.mapStartCleared:data.cleared;
 let mapStartKills=Number.isFinite(data.world?.mapStartKills)?data.world.mapStartKills:data.kills;
 const CHUNK_SPAN=3400;
@@ -81,11 +138,6 @@ let worldChunk=0;
 function nextMapLabel(target,from){
   const to=P.chapterFor(target),cur=P.chapterFor(from);
   return to.key===cur.key?'进入 '+to.districts[(target-1)%5].name:'进入'+to.title.replace(' · ','-');
-}
-/* 闸门打开只声明状态，按钮长什么样交给 hud() —— 两处各写一份文案正是上面那个 bug 的成因。 */
-function announceMapGate(){
-  if(!mapGate)mapGate={district:data.district+1};
-  hud();
 }
 function appendWorldChunk(){
   // 每块独立播种：只重建存档附近的块，也能还原同一栋楼的尺寸与外观。
@@ -104,15 +156,15 @@ function appendWorldChunk(){
   for(let i=0;i<10;i++){let type=choices[i%choices.length],flying=/heli|gunship|jet|drone/.test(type);let e=enemy(type,base+380+i*330,flying?rand(165,255):undefined);e.fixed=true;e.id='c'+worldChunk+'-e'+i;enemies.push(e);}
   worldChunk++;
 }
-function ensureWorldAhead(){while(p.x>LENGTH-1900+(worldChunk-1)*CHUNK_SPAN)appendWorldChunk();if(worldChunk>1){buildings=buildings.filter(b=>b.x>p.x-2200);enemies=enemies.filter(e=>e.type==='sentinel'||e.x>p.x-2200||alive(e)&&Math.abs(e.x-p.x)<1350);}}
+function ensureWorldAhead(){while(p.x>LENGTH-1900+(worldChunk-1)*CHUNK_SPAN)appendWorldChunk();if(worldChunk>1){buildings=buildings.filter(b=>b.x>p.x-2200);enemies=enemies.filter(e=>bossEntity(e)||e.x>p.x-2200||alive(e)&&Math.abs(e.x-p.x)<1350);}syncBossPost();}
 function completeBossChallenge(){
   data.district++;data.dna+=2;grant(180+data.district*30,P.xpPerDistrict(data.district));
-  mapGate=null;bossChallengeStarted=false;mapStartCleared=data.cleared;mapStartKills=data.kills;
+  bossChallengeStarted=false;nodeArmed=false;mapStartCleared=data.cleared;mapStartKills=data.kills;
   generateWorld();save();banner('区域已摧毁','已自动进入 '+chapterLocation());
 }
 function requestNextMap(){
   if(bossChallengeAvailable()){
-    const e=sentinel();bossChallengeStarted=true;e.introStarted=false;e.introDone=false;e.introTime=0;
+    const e=sentinel();armBossIntro(e);bossChallengeStarted=true;e.introStarted=false;e.introDone=false;e.introTime=0;
     e.cd=2;save();hud();banner('摧毁指令已确认','银曜巨人正在降临');return 'challenge';
   }
   return false;
@@ -144,6 +196,11 @@ function fmt(n){if(n>=1e9)return(n/1e9).toFixed(2)+'B';if(n>=1e6)return(n/1e6).t
  * 结果是 1→11 级体型 +29%、屏幕上只有 +15%。判据是"体型 × 镜头"这个
  * 乘积有没有随等级变大，见 growth.VIEW 与 tests/growth-system.test.cjs。 */
 function bodyScale(){return Growth.bodyScale(data.level,data.talents,data.morph,P.EPOCHS);}
+/* 火焰 / 烟尘粒子尺寸的唯一出口（render 的火焰与 update 的烟尘都调它）。
+ * 跟体型走但锁在 25 级：jitter 是每处火自己的随机扰动，只放大不超过上限。
+ * ⚠️ 上限是 FX_SCALE_MAX，**不是** bodyScale() —— 见文件开头那段说明，
+ * 别再写成 bodyScale() 直通，那正是"怪越大火越糊"的老毛病。 */
+function fxScale(jitter){return clamp(Math.min(bodyScale(),FX_SCALE_MAX)*(1+(jitter||0)),.25,FX_SCALE_MAX);}
 /* 把骨骼（含挂点）按 bodyScale 围绕脚底 pivot 等比缩放，角色与挂点共用同一缩放。 */
 function scaleRig(state,bs,px,py){const mp=b=>({x:px+(b.x-px)*bs,y:py+(b.y-py)*bs,a:b.a});const bones={};for(const k in state.bones)bones[k]=mp(state.bones[k]);const pt=q=>({x:px+(q.x-px)*bs,y:py+(q.y-py)*bs});return{bones,seams:(state.seams||[]).map(s=>({x:px+(s.x-px)*bs,y:py+(s.y-py)*bs,a:s.a,rx:s.rx*bs,ry:s.ry*bs})),muzzle:pt(state.muzzle),claw:pt(state.claw),foot:pt(state.foot),tail:pt(state.tail),neutral:state.neutral};}
 /* 原子吐息主色：主元素决定，否则按突变体征（赤化/白化），默认青蓝。 */
@@ -190,19 +247,19 @@ function explosion(x,y,big=1){burst(x,y,Math.round(35*big),undefined,230*big);ri
 function enemy(type,x,y){let spec=TYPES[type],hp=spec.hp*P.Ke(data.district)*(currentStage().key==='village'?.6:1);return {type,x,y:y??G-17,baseY:y??G-17,hp,max:hp,cd:rand(1,4),hit:0,phase:rand(0,7),state:'alive',vx:0,vy:0,rotation:0,spin:0,age:0,hitIds:new Set()};}
 function cameraScale(){return Growth.cameraScale(data.level,data.talents,data.morph,P.EPOCHS);}
 function cameraTarget(){return p.x-(420+140*clamp((bodyScale()-.333)/.787,0,1));}
-function worldSnapshot(){return {district:data.district,stage:currentStage().key,x:p.x,nextDistrict:null,bossChallengeStarted,mapStartCleared,mapStartKills,worldChunk,buildings:buildings.filter(b=>b.x>p.x-2200).map(b=>({id:b.id,hp:b.hp,max:b.max,dead:b.dead})),enemies:enemies.filter(e=>e.fixed&&e.x>p.x-2200).map(e=>({id:e.id,hp:e.hp,state:e.state,...(e.type==='sentinel'?{introDone:e.introDone,introStarted:e.introStarted,introTime:e.introTime}:{} )}))};}
+function worldSnapshot(){return {district:data.district,stage:currentStage().key,x:p.x,nextDistrict:null,bossChallengeStarted,nodeArmed,mapStartCleared,mapStartKills,worldChunk,buildings:buildings.filter(b=>b.x>p.x-2200).map(b=>({id:b.id,hp:b.hp,max:b.max,dead:b.dead})),enemies:enemies.filter(e=>bossEntity(e)||e.fixed&&e.x>p.x-2200).map(e=>({id:e.id,hp:e.hp,state:e.state,...(e.type==='sentinel'?{introDone:e.introDone,introStarted:e.introStarted,introTime:e.introTime}:{} )}))};}
 function save(){if(panelMode)return;try{SAVEIO.setItem(SAVE,economy.serialize(Date.now(),worldSnapshot()));if(browserPanel&&!browserPanel.closed)browserPanel.__growth?.sync(JSON.stringify(data));storageOK=true;$('saveState').innerHTML='<i></i> 进化进度已保存';}catch{storageOK=false;$('saveState').textContent='当前窗口运行 · 无法写入存档';}}
 function generateWorld(restore){seed=1701+data.district*983;buildings=[];enemies=[];bullets=[];fires=[];wrecks=[];particles=[];rings=[];beam=null;
-bossChallengeStarted=restore?.district===data.district&&restore.bossChallengeStarted===true;
+bossChallengeStarted=restore?.district===data.district&&restore.bossChallengeStarted===true;nodeArmed=restore?.district===data.district&&restore.nodeArmed===true;
 const stage=currentStage();sceneZoom=cameraScale();
 let diff=P.Kb(data.district);for(let layer=0;layer<3;layer++){let i=0;for(let x=layer===1?650:layer===0?560:810;x<LENGTH-400;x+=layer===1?210:layer===0?185:310){let w=layer===2?125+rnd()*60:100+rnd()*57,h=stage.key==='village'?(layer===2?38+rnd()*24:70+rnd()*62):stage.key==='suburb'?(layer===2?65+rnd()*50:130+rnd()*95):layer===2?90+rnd()*80:layer===0?210+rnd()*170:255+rnd()*170;let b=makeBuilding(Math.round(x+rnd()*32),Math.round(w),Math.round(h),i+layer*13);b.layer=layer;b.id=layer+'-'+i;/* 正面主楼用商业塔楼资产，其余街区楼用街区大楼资产。 */
 if(stage.key==='city'&&layer===1){b.kind='tower';b.assetId=buildingAssetId('city','tower');}b.ground=G+(layer===2?32:layer===0?-14:0);b.max=b.hp=Math.round(3*(layer===1?780:layer===0?520:360)*diff*(1+Math.max(0,b.h-(layer===2?90:210))/500));b.floorCount=Math.ceil(h/35);b.tilt=(rnd()-.5)*.22;buildings.push(b);i++;}}
 let tier=stage.key==='village'?1:stage.key==='suburb'?Math.min(3,data.district):Math.min(5,data.district);for(let i=0;i<16;i++){let type='tank';if(i%4===1)type='heli';else if(i%4===3&&tier>=2)type='rocket';if(tier>=3&&i%5===2)type='gunship';if(tier>=4&&i%5===3)type='aegis';if(tier>=5&&i%7===0)type='mech';if(tier>=2&&i%6===4)type='drone';if(tier>=4&&i%6===1)type='jet';if(tier>=3&&i%8===5)type='walker';if(tier>=4&&i%9===7)type='bunker';if(stage.key==='village'&&i%4===2)type='drone';let flying=/heli|gunship|jet|drone/.test(type);let e=enemy(type,620+i*253,flying?(stage.key==='village'?G-190:165)+i%3*28:undefined);e.fixed=true;e.id='e'+i;enemies.push(e);}
-{let e=enemy('sentinel',LENGTH-390,G-180);e.fixed=true;e.id='boss-sentinel';e.gate=true;e.introDone=false;e.introStarted=false;e.introTime=0;e.cd=2;enemies.push(e);}
+{let e=enemy('sentinel',LENGTH-NODE_GUARD,G-180);e.fixed=true;e.id='boss-sentinel';e.gate=true;e.introDone=false;e.introStarted=false;e.introTime=0;e.cd=2;enemies.push(e);}
 worldChunk=1;const savedChunks=restore?.district===data.district?Math.floor(Number(restore.worldChunk)||1):1;const count=Math.max(1,Math.min(savedChunks,1000000));for(let i=Math.max(1,count-2);i<count;i++){worldChunk=i;appendWorldChunk();}
 p.x=420;p.action={name:'walk',t:0};p.cooldowns={beam:18,stomp:7,tail:10,roar:19};p.step=0;p.angle=.12;
 if(restore&&restore.district===data.district){p.x=clamp(Number(restore.x)||420,420,LENGTH+Math.max(0,worldChunk-2)*CHUNK_SPAN+CHUNK_SPAN);let states=new Map((Array.isArray(restore.buildings)?restore.buildings:[]).map(b=>[b.id,b]));for(let b of buildings){let s=states.get(b.id);if(s){let oldMax=Number(s.max)>0?Number(s.max):(b.layer===1?230:b.layer===0?120:85)*(1+Math.max(0,data.district-1)*.12);b.hp=b.max*clamp((Number(s.hp)||0)/oldMax,0,1);b.dead=s.dead===true||b.hp<=0;b.collapse=b.dead?3:0;}}let es=new Map((Array.isArray(restore.enemies)?restore.enemies:[]).map(e=>[e.id,e]));for(let e of enemies){let s=es.get(e.id);if(s){e.hp=clamp(Number(s.hp)||0,0,e.max);if(e.type==='sentinel'){e.introDone=s.introDone===true;e.introStarted=s.introStarted===true;e.introTime=clamp(Number(s.introTime)||0,0,window.SentinelBoss.INTRO.duration);}if(s.state!=='alive'||e.hp<=0)e.state='gone';}}}
-if(worldChunk>1){buildings=buildings.filter(b=>b.x>p.x-2200);enemies=enemies.filter(e=>e.x>p.x-2200||alive(e)&&Math.abs(e.x-p.x)<1350);}camera=cameraTarget();$('location').textContent=cityTitle();refreshTicker();commitTicker();tickerOffset=0;spawnTimer=7;}
+if(worldChunk>1){buildings=buildings.filter(b=>b.x>p.x-2200);enemies=enemies.filter(e=>bossEntity(e)||e.x>p.x-2200||alive(e)&&Math.abs(e.x-p.x)<1350);}syncBossPost();camera=cameraTarget();$('location').textContent=cityTitle();refreshTicker();commitTicker();tickerOffset=0;spawnTimer=7;}
 function grant(n,xp,x,y){n*=economy.rewardMult();economy.gain(n,xp);if(x!==undefined)floaters.push({x,y,text:'+'+Math.round(n),life:1.2,color:'#a0e9df'});}
 function damageBuilding(b,n,source='claw'){if(b.dead)return;b.hp-=n;b.hit=.13;if(Math.random()<.17)burst(b.x+rand(0,b.w),b.ground-b.h*.6,3,['#708299','#485568','#c5b9a3'],90);if(b.hp<=0){b.dead=true;b.hp=0;b.collapse=.001;data.cleared++;grant(30+b.h*.11,P.xpPerBuilding(data.district,b.layer),b.x+b.w/2,b.ground-b.h);fires.push({x:b.x+b.w*.6,y:b.ground-12,size:35+b.w*.12,age:0,jitter:rnd()*.2-.1});explosion(b.x+b.w/2,b.ground-b.h*.48,b.layer===1?1.6:.8);for(let j=0;j<7;j++)smoke(b.x+rand(0,b.w),b.ground-b.h*.4,30);if(b.layer===1)broadcast('建筑群接连倒塌，巨兽正突破街区封锁','现场记者：承重结构已断裂，坍塌引发连锁尘浪');}}
 function defeat(e,source='beam'){if(!alive(e))return;e.hp=0;e.age=0;e.hit=0;data.kills++;grant(TYPES[e.type].reward,P.xpPerEnemy(data.district),e.x,e.y-50);if(e.type==='sentinel'){e.state='falling';e.age=0;shake=12;broadcast('巨型守卫倒下，区域即将被摧毁','银曜巨人核心熄灭 · 正在打开下一地区通道');return;}let flying=/heli|gunship/.test(e.type);if(source==='claw'||source==='tail'){e.state='flying';e.vx=rand(230,370)*(source==='tail'?-1:1);e.vy=-rand(250,390);e.spin=(source==='tail'?-1:1)*rand(4,8);burst(e.x,e.y,14,undefined,130);broadcast(flying?'直升机被巨兽击飞，正在失控翻滚':'装甲车辆被拍向半空，残骸高速翻滚','现场画面：目标将在落地时发生二次爆炸');}else if(flying){e.state='crashing';e.vx=rand(-100,160);e.vy=rand(0,50);e.spin=rand(1.8,3.5);explosion(e.x,e.y,.65);broadcast('武装直升机失控，拖着浓烟坠向街区','地面机位追踪中 · 旋翼损毁，机身持续旋转');}else{e.state='exploding';e.rotation=rand(-.12,.12);e.age=0;explosion(e.x,e.y,1.1);fires.push({x:e.x,y:G-12,size:33,age:0,jitter:rnd()*.2-.1});}}
@@ -239,7 +296,7 @@ function updateEnemies(dt){for(let e of enemies){e.age+=dt;if(alive(e)){if(Math.
  * 也可能整片打空。命中闪光的落点同样是硬编码的 G-185，一并跟着盒子走。 */
 const HB=KaijuRig.hitbox(BS,p.x,G);
 for(let b of bullets){b.life-=dt;b.trail.push([b.x,b.y]);if(b.trail.length>6)b.trail.shift();b.x+=b.vx*dt;b.y+=b.vy*dt;if(b.type==='rocket'&&Math.random()<.2)smoke(b.x,b.y,7);if(b.x>HB.x0&&b.x<HB.x1&&b.y>HB.y0&&b.y<HB.y1){burst(b.x,b.y,6,['#ffda8a','#c6ffff','#63748b'],100);burst(HB.x0+(HB.x1-HB.x0)*0.42,HB.y0+(HB.y1-HB.y0)*0.6,18,['#ff344b','#ff6d7a','#ffd8d2'],105);p.recoil=.1;hitFlash=.18;shake=Math.max(shake,3);b.life=0;}if(b.y>G){burst(b.x,G,5);b.life=0;}}bullets=bullets.filter(b=>b.life>0&&Math.abs(b.x-p.x)<1400);spawnTimer-=dt;if(spawnTimer<=0){spawnTimer=12;let nearby=enemies.filter(e=>alive(e)&&Math.abs(e.x-p.x)<1100).length;if(nearby<6&&p.x<LENGTH-800){let choices=currentStage().key==='village'?['tank','heli','drone']:data.district>=5?['gunship','aegis','mech','jet','drone','walker','bunker']:data.district>=3?['gunship','rocket','jet','drone','walker']:data.district>=2?['rocket','heli','drone','jet']:['tank','heli','drone'];let type=choices[Math.floor(rand(0,choices.length))];let flying=/heli|gunship|jet|drone/.test(type);enemies.push(enemy(type,p.x+1000,flying?rand(165,255):undefined));}}
-enemies=enemies.filter(e=>e.fixed||e.state!=='gone'&&Math.abs(e.x-p.x)<1900);}
+enemies=enemies.filter(e=>bossEntity(e)||e.fixed||e.state!=='gone'&&Math.abs(e.x-p.x)<1900);}
 function audioInit(){try{if(!audio){audio=new(window.AudioContext||window.webkitAudioContext)();master=audio.createGain();master.gain.value=.32;master.connect(audio.destination);}audio.resume();}catch(e){muted=true;}}
 function tone(f,d=.1,type='square',v=.05,end=f){if(!audio||muted)return;const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.setValueAtTime(f,audio.currentTime);o.frequency.exponentialRampToValueAtTime(Math.max(10,end),audio.currentTime+d);g.gain.setValueAtTime(v,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(master);o.start();o.stop(audio.currentTime+d);}
 function noise(d=.3,v=.3,low=800){if(!audio||muted)return;let b=audio.createBuffer(1,audio.sampleRate*d,audio.sampleRate),a=b.getChannelData(0);for(let i=0;i<a.length;i++)a[i]=(Math.random()*2-1)*(1-i/a.length);let s=audio.createBufferSource(),f=audio.createBiquadFilter(),g=audio.createGain();s.buffer=b;f.type='lowpass';f.frequency.value=low;g.gain.value=v;s.connect(f);f.connect(g);g.connect(master);s.start();}
@@ -375,7 +432,7 @@ function updateSentinel(e,dt){
   const B=window.SentinelBoss;
   if(!bossChallengeStarted)return;
   if(e.introDone===false){
-    if(!e.introStarted){if(Math.abs(e.x-p.x)>580)return;e.introStarted=true;e.introTime=0;banner('上空高能反应','巨型生命体正在急速接近');sound('roar');}
+    if(!e.introStarted){if(Math.abs(e.x-p.x)>BOSS_IN_RANGE)return;e.introStarted=true;e.introTime=0;banner('上空高能反应','巨型生命体正在急速接近');sound('roar');}
     const previous=e.introTime;e.introTime=Math.min(B.INTRO.duration,e.introTime+dt);
     if(previous<B.INTRO.impact&&e.introTime>=B.INTRO.impact){
       shake=19;slow=.17;sound('boom');
@@ -500,7 +557,7 @@ function drawWeather(){
   ctx.globalAlpha=1;
 }
 function drawCampaignRoute(){
-  const r=currentRoute(),ready=!!mapGate,x0=262,y=44,w=500,step=w/4,gap=8,inner=step-gap*2,exitLen=40;
+  const r=currentRoute(),ready=bossChallengeAvailable(),x0=262,y=44,w=500,step=w/4,gap=8,inner=step-gap*2,exitLen=40;
   ctx.save();rect(x0-20,8,800,70,'#071225e8');
   text(r.chapter.title+' / '+r.street.name+' · 第'+r.round+'轮',x0-8,25,14,r.street.color);
   /* 推图轨道与 5 个节点**画在同一条线**上（y=44），节点方块压在轨道上。
@@ -532,7 +589,7 @@ function drawCampaignRoute(){
   text('下一城区 · '+r.nextStreet.name,x0+w+48,45,12,r.nextStreet.color);
   text(ready?'已突破 · 遥控器进入下一城区':'本区推进 '+Math.floor(r.progress*100)+'%',x0+w+48,69,12,ready?'#ff9aa2':'#b6cadc');ctx.restore();
 }
-function render(){ctx.setTransform(.5,0,0,.5,0,0);ctx.clearRect(0,0,W,H);drawSky();ctx.save();let center=p.x-camera,s=sceneZoom*zoom*.8;ctx.translate(center,H*.72);ctx.scale(s,s);ctx.translate(-center,-G);if(shake>0)ctx.translate(Math.sin(time*90)*shake,Math.cos(time*73)*shake*.45);drawSky();drawGround();drawBuildings(0);drawBuildings(1);drawWrecks();for(let e of enemies)if(alive(e))drawEnemy(e);drawGodzilla(SK,BS);drawBeam();for(let b of bullets){let t=b.trail.map(v=>[v[0]-camera,v[1]]);if(t.length>1)line(t,b.type==='electric'?'#84dfff':'#ffa155',3);rect(b.x-camera-5,b.y-3,10,6,b.type==='electric'?'#bfffff':'#fff0a2');}for(let e of enemies)if(!alive(e))drawEnemy(e);for(let f of fires)if(Math.abs(f.x-camera-W/2)<W){const fireScale=clamp(bodyScale()*(1+(f.jitter||0)),.25,2.4);fire(f.x-camera,f.y,f.size*3.2*fireScale*Math.min(1,(24-f.age)/8));}drawParticles();drawBuildings(2);drawForeground();drawWeather();ctx.restore();drawCampaignRoute();const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'#01091b65');shade.addColorStop(.2,'#010a1900');shade.addColorStop(.75,'#010a1900');shade.addColorStop(1,'#02091b88');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);out.drawImage(buffer,0,0,W,H);
+function render(){ctx.setTransform(.5,0,0,.5,0,0);ctx.clearRect(0,0,W,H);drawSky();ctx.save();let center=p.x-camera,s=sceneZoom*zoom*.8;ctx.translate(center,H*.72);ctx.scale(s,s);ctx.translate(-center,-G);if(shake>0)ctx.translate(Math.sin(time*90)*shake,Math.cos(time*73)*shake*.45);drawSky();drawGround();drawBuildings(0);drawBuildings(1);drawWrecks();for(let e of enemies)if(alive(e))drawEnemy(e);drawGodzilla(SK,BS);drawBeam();for(let b of bullets){let t=b.trail.map(v=>[v[0]-camera,v[1]]);if(t.length>1)line(t,b.type==='electric'?'#84dfff':'#ffa155',3);rect(b.x-camera-5,b.y-3,10,6,b.type==='electric'?'#bfffff':'#fff0a2');}for(let e of enemies)if(!alive(e))drawEnemy(e);for(let f of fires)if(Math.abs(f.x-camera-W/2)<W){const fireScale=fxScale(f.jitter);fire(f.x-camera,f.y,f.size*3.2*fireScale*Math.min(1,(24-f.age)/8));}drawParticles();drawBuildings(2);drawForeground();drawWeather();ctx.restore();drawCampaignRoute();const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'#01091b65');shade.addColorStop(.2,'#010a1900');shade.addColorStop(.75,'#010a1900');shade.addColorStop(1,'#02091b88');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);out.drawImage(buffer,0,0,W,H);
 if(channel==='live'){monitor.drawImage(buffer,clamp((p.x-camera)/2-15,0,420),130,210,130,0,0,240,130);monitor.fillStyle='#153d5633';monitor.fillRect(0,0,240,130);monitor.fillStyle='#f0505d';monitor.fillRect(8,8,4,4);}if(channel!=='live')drawChannel();}
 const ACTIONS={walk:['持续跟踪','目标正在向城市深处移动'],claw:['现场：巨爪横扫','挥爪、击飞与建筑结构破坏'],beam:['高能预警：原子吐息','口部射线正在锁定前方目标'],stomp:['地震警报：巨兽重踏','地面冲击波席卷近处防线'],roar:['声压异常：震慑咆哮','空中编队失去稳定，炮弹被震散'],tail:['现场：尾部横扫','后方与前景建筑受到大范围撞击']};
 const PROGRAMS={
@@ -861,9 +918,9 @@ let label=ACTIONS[p.action.name];$('actionLabel').textContent=p.action.super?'�
 function processEconomyEvents(){for(let e of economy.events){if(e.type==='evolution'){banner('巨兽进化 · LV '+e.level,'G-CELL MUTATION / 突变点 +1');broadcast('观察站：巨兽完成第 '+e.level+' 级进化，力量持续增强','进化获得 1 突变点，可用于分支技能树',true);sound('pickup');}else if(e.type==='skill'){let s=P.SKILLS.find(s=>s.id===e.id);broadcast('新的生物特征被确认：「'+s.name+'」已经觉醒',s.desc,true);}else if(e.type==='mutation'){let m=P.MUTATION_BY_ID[e.id];if(m){let col=(P.RARITY_BY_KEY[m.rarity]||{}).color||'#c8ccd4';banner('体征变化 · '+(P.RARITY_BY_KEY[m.rarity]||{}).name+' · '+m.name,(m.part?'部位 '+m.part+' · ':'')+m.desc);if(e.rarity==='rare'||e.rarity==='epic'||e.rarity==='legend'){flash=.12;hitFlash=Math.max(hitFlash,.12);}sound('pickup');}}else if(e.type==='talent'){let n=P.TALENT_BY_ID[e.id];if(n)banner('天赋 · '+n.name+' '+e.level+' 级','');}}economy.events=[];}
 function catchUp(now){let report=economy.offline(now);if(report){$('offlineText').textContent='离线 '+Math.floor(report.seconds/60)+' 分钟，已入账 '+fmt(report.amount)+' 核能 · '+fmt(report.xp)+' 经验'+(report.capped?'（8 小时上限）':'')+'。';$('offline').hidden=false;broadcast('离线观测数据已归档，核能与经验自动入账','离线按被动产能折算，城市位置与破坏进度保留');save();}}
 function update(dt,wallDt=dt){elapsed+=dt;time+=dt;economy.tick(wallDt);processEconomyEvents();scrollNews(wallDt);music(dt);headlineTimer-=dt;breakingCd=Math.max(0,breakingCd-dt);noticeTimer-=wallDt;if(noticeTimer<=0)$('notice').style.opacity=0;bannerTimer-=wallDt;if(bannerTimer<=0)$('eventBanner').hidden=true;const storm=currentChapter().weather?.lightning===true;nextLightning-=dt;if(storm&&nextLightning<=0){lightning=.34;nextLightning=rand(7,13);bolt=[];let x=rand(100,1180);for(let y=0;y<400;y+=35){x+=rand(-65,65);bolt.push([x,y]);}noise(1.5,.32,250);}if(!storm)lightning=0;else lightning=Math.max(0,lightning-dt);shake=Math.max(0,shake-dt*22);p.recoil=Math.max(0,p.recoil-dt);slow=Math.max(0,slow-wallDt);
-updateAI(dt);updateBeam(dt);updateEnemies(dt);camera+=(Math.max(0,cameraTarget())-camera)*Math.min(1,dt*3);zoom+=((p.action.name==='beam'?1.045:p.action.name==='roar'?1.025:1)-zoom)*Math.min(1,dt*2);sceneZoom+=(cameraScale()-sceneZoom)*Math.min(1,dt*1.5);
+updateAI(dt);updateBeam(dt);updateEnemies(dt);armNodeGate();camera+=(Math.max(0,cameraTarget())-camera)*Math.min(1,dt*3);zoom+=((p.action.name==='beam'?1.045:p.action.name==='roar'?1.025:1)-zoom)*Math.min(1,dt*2);sceneZoom+=(cameraScale()-sceneZoom)*Math.min(1,dt*1.5);
 for(let b of buildings){b.hit=Math.max(0,b.hit-dt);if(b.dead&&b.collapse<3){b.collapse+=dt;if(Math.random()<dt*20)smoke(b.x+rand(0,b.w),b.ground-Math.max(0,b.h*(1-b.collapse*.6)),25);}else if(!b.dead&&b.hp<b.max*.65&&Math.random()<dt*7)smoke(b.x+b.w*.66,b.ground-b.h*.6,18);}
-for(let f of fires){f.age+=dt;const smokeRate=data.level<15?5.5:11;if(Math.random()<dt*smokeRate){const smokeScale=clamp(bodyScale()*(1+(f.jitter||0)),.25,2.4);smoke(f.x+rand(-f.size/2,f.size/2),f.y-20,20*smokeScale);}}fires=fires.filter(f=>f.age<24&&Math.abs(f.x-p.x)<1900).slice(-60);for(let w of wrecks)w.age+=dt;wrecks=wrecks.filter(w=>w.age<50&&Math.abs(w.x-p.x)<1900).slice(-40);
+for(let f of fires){f.age+=dt;const smokeRate=data.level<15?5.5:11;if(Math.random()<dt*smokeRate){smoke(f.x+rand(-f.size/2,f.size/2),f.y-20,20*fxScale(f.jitter));}}fires=fires.filter(f=>f.age<24&&Math.abs(f.x-p.x)<1900).slice(-60);for(let w of wrecks)w.age+=dt;wrecks=wrecks.filter(w=>w.age<50&&Math.abs(w.x-p.x)<1900).slice(-40);
 for(let a of particles){a.life-=dt;a.x+=a.vx*dt;a.y+=a.vy*dt;a.vy+=a.gravity*dt;if(a.smoke)a.size+=dt*11;else if(a.y>G+8){a.y=G+8;a.vy*=-.22;a.vx*=.7;}}particles=particles.filter(a=>a.life>0&&Math.abs(a.x-p.x)<1800).slice(-700);for(let r of rings){r.life-=dt;r.r+=dt*(r.type==='blast'?170:470);}rings=rings.filter(r=>r.life>0);for(let f of floaters){f.life-=dt;f.y-=dt*27;}floaters=floaters.filter(f=>f.life>0);if(p.moving&&Math.random()<dt*10)burst(p.x+25,G,2,['#629fbc','#b7dcf3'],80);
 saveTimer+=wallDt;if(saveTimer>=5){saveTimer=0;save();}uiTimer+=wallDt;if(uiTimer>=.2){uiTimer=0;hud();}}
 buildUI();
