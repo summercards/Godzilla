@@ -692,46 +692,43 @@ function drawWeather(){
   ctx.globalAlpha=1;
 }
 function drawCampaignRoute(){
-  /* 版面尺寸 2026-09-20 按反馈整体放大（"进度条太小了"）。
+  /* 2026-09-20 第二版反馈：「上面这段信息不好看，简化成一个进度条就好了，
+   * 文字都去掉，可以靠上一点。」
    *
-   * 预算来自实测，不是目测：.workbuddy/_route-metric.cjs 量出画面上那一排 DOM
-   * 浮层在 1280×720 逻辑坐标里的真实占位 —— .camera-top 从 y=158 起、.ticker
-   * 从 y=662 起、.action-caption 在左下 573~655。所以这条推图条可以用到 y≈150
-   * 而不撞它们；改大这里任何数字之前先重跑那个探针。
+   * 上一版（同日上午）把整块放大到了 1010×132：底板 + 标题 + 5 个 30px 节点方块
+   * + 右栏三行 18px 文字。问题不在尺寸，在**信息密度**：
+   *   · 五处中文挤在 132px 高里，1:1 下互相糊成一团（12×13 的像素字体没有抗锯齿余地）；
+   *   · 右栏三行分别说"下一章 / 下一城区 / 推进度"，其中两行是玩家此刻用不上的；
+   *   · 30px 方块 + 40px 红框把"5 个区"这个结构信息放大成了画面里最响的元素。
    *
-   * 现在的版面：底板 y 6~138，标题 22px 基线 40，轨道 10px 压在中线 y=78 上，
-   * 节点 30px 方块（闸门开时套 40px 红框），右栏三行 18px。 */
-  const r=currentRoute(),ready=bossChallengeAvailable(),x0=262,y=78,w=560,step=w/4,gap=24,inner=step-gap*2,exitLen=56;
-  ctx.save();rect(x0-26,6,1010,132,'#071225f0');
-  text(r.chapter.title+' / '+r.street.name+' · 第'+r.round+'轮',x0-10,40,22,r.street.color);
-  /* 推图轨道与 5 个节点**画在同一条线**上（y=44），节点方块压在轨道上。
+   * 现在只留一条进度条，**一个字的文案都没有**：
+   *   走过的段绿 / 当前段按本区推进度填街道色 / 未到的段暗，
+   *   5 段的边界用 2px 刻度缝表示 —— "一章 5 个区"这个结构信息还在，但不再是主角；
+   *   闸门已开时整条描一圈红边，与遥控器那颗按钮的红是同一个含义。
+   * 推进度本身由填充长度表达，不再写成百分比文字。
    *
-   * 老实现把进度条单独画在 y=65：既不和节点同一条线，填充宽度 (w+16)*progress
-   * 也完全不含当前节点序号 —— 站在第 2 个区、本区推进 0% 时条子照样从最左边
-   * 一路铺开，看着像"快到章末了"；而节点之间那段连线只在 i<index 时变绿，
-   * **正在推进的那一段永远是暗的**，所以"推图指示不会亮"。
-   *
-   * 现在的口径：走过的段绿、当前段按本区推进度填街道色、未到的段暗。
-   * 本区推进度就是突破闸门的进度（12 栋建筑 / 8 个敌军，见 mapProgress()）。
-   * 本章最后一个区（index 4）没有"下一段"，进度改填右侧那段「本章出口」。 */
-  rect(x0,y-5,w,10,'#30445b');
-  if(r.index===4)rect(x0+w,y-5,exitLen,10,'#30445b');
-  for(let i=0;i<r.index&&i<4;i++)rect(x0+i*step+gap,y-5,inner,10,'#70e7b0');
-  const fill=(r.index<4?inner:exitLen)*r.progress;
-  if(fill>0)rect(x0+r.index*step+gap,y-5,fill,10,r.street.color);
-  for(let i=0;i<5;i++){const x=x0+i*step,done=i<r.index,current=i===r.index;
-    /* 闸门已开 = 可以进入下一城区，当前节点套一圈红框 —— 与按钮的红是同一个含义。 */
-    if(current&&ready)rect(x-20,y-20,40,40,'#ff7780');
-    rect(x-15,y-15,30,30,done?'#70e7b0':current?r.street.color:'#4b6075');
-    text(String(r.nodes[i].district),x+22,y+6,16,current?'#fff3c4':'#94a9bd');}
-  /* 右栏说清"下一个区落在哪一章"。老实现写的是 '下一城区 · '+章名（"下一城区 · 大阪"），
-   * 大阪是城市不是城区，而"下一章 · 东京"这个真正要玩家等的信号反而没出现。
-   * 红只留给**真的跨章**那一下 —— 同章内变红会把"可以切场景"这个信号稀释掉，
-   * 开门（可推进）由当前节点的红圈和下面那行「已突破」负责。 */
-  const cross=r.nextChapter.key!==r.chapter.key;
-  text((cross?'下一章 · ':'本章 · ')+r.nextChapter.name,x0+w+56,42,18,(cross&&ready)?'#ff7780':'#b6cadc');
-  text('下一城区 · '+r.nextStreet.name,x0+w+56,78,18,r.nextStreet.color);
-  text(ready?'已突破 · 遥控器进入下一城区':'本区推进 '+Math.floor(r.progress*100)+'%',x0+w+56,114,18,ready?'#ff9aa2':'#b6cadc');ctx.restore();
+   * 版面：条身 h=8 居中于 y=26，背板占 y 20~40。上方留白 20px，下方到
+   * .camera-top（**y=108 起** = CSS 的 top:15%，实测见 .workbuddy/_route-metric.cjs）
+   * 还有 68px 余量。改这里任何数字之前先重跑那个探针。 */
+  const r=currentRoute(),ready=bossChallengeAvailable();
+  const w=560,h=8,x0=(W-w)/2,y=26,seg=w/5;
+  ctx.save();
+  /* 背板只包住条身一圈（不是原来那种整块面板）。亮场景 —— 纽约 dawn、浓雾 ——
+   * 下没有它就整条化在天空里，所以这一圈不能省。 */
+  rect(x0-6,y-6,w+12,h+12,'#071225cc');
+  rect(x0,y,w,h,'#2b3d52');
+  /* 走过的段。index=4（本章最后一个区）时填前 4 段，第 5 段留给当前段填充。 */
+  for(let i=0;i<r.index;i++)rect(x0+i*seg+1,y,seg-2,h,'#70e7b0');
+  /* 当前段按本区推进度填街道色。本区推进度 = 突破闸门的进度
+   * （12 栋建筑 / 8 个敌军，见 mapProgress()）。 */
+  const fill=(seg-2)*r.progress;
+  if(fill>0)rect(x0+r.index*seg+1,y,fill,h,r.street.color);
+  /* 4 条刻度缝，代替原来的 30px 节点方块。 */
+  for(let i=1;i<5;i++)rect(x0+i*seg-1,y,2,h,'#071225e6');
+  /* 闸门已开 = 可以推进。整条描红边，替代原来只在当前节点上套的红框。 */
+  if(ready){rect(x0-6,y-6,w+12,3,'#ff7780');rect(x0-6,y+h+3,w+12,3,'#ff7780');
+    rect(x0-6,y-6,3,h+12,'#ff7780');rect(x0+w+3,y-6,3,h+12,'#ff7780');}
+  ctx.restore();
 }
 /* 转台雪花。噪点是"第几帧 + 第几行"哈希出来的，不用 Math.random ——
  * 画面噪声不该消耗熵源，也不该随帧率抖成另一张图（这是外观表现，

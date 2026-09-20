@@ -220,8 +220,14 @@ html:not(.panel-view) #management{display:none!important}
 .panel-view .evo-row{flex-wrap:wrap}
 .panel-view .evo-desc{flex-basis:100%;margin:0}
 /* 原来这里还有一段「HUD 单行，避免摄像机状态与资源条叠在一起」的规则，
- * 随常驻 HUD 一起删除。 */
-.camera-top{top:17%}
+ * 随常驻 HUD 一起删除。
+ *
+ * 这里原本还留着一条孤立的 `.camera-top{top:17%}`，2026-09-20 删掉：
+ * 它是死值 —— `.panel-view .camera-top` 已被 display:none（见上），
+ * 所以它只可能作用在电视侧，而电视侧真正生效的是文件末尾那条
+ * `html:not(.panel-view) .camera-top{top:15%}`（特指度更高）。
+ * 两处各写一个百分比 = 改一处漏一处，留着只会误导下一个改版面的人。
+ * 机位条的纵向位置现在**只有一个真源**：末尾那条。 */
 
 /* 观影时副屏打开，战斗继续运行。 */
 .whiteflash{animation:whiteFlash .2s}
@@ -251,7 +257,10 @@ html:not(.panel-view) .shell :is(span,small,b,strong,p,h1,i,button,div){font-siz
 html:not(.panel-view) .pixel-button.chunky .pb-tx{font-size:var(--tv-label)}
 html:not(.panel-view) .pixel-button.chunky .pb-ico{font-size:30px}
 html:not(.panel-view) .shell :is(.side-title,.chan-btn,.camera-top,.camera-top small,.camera-id,.action-caption small,.event-banner small,.breaking span,.headline>span,.headline p,.live-bug>span,.ticker-track>span,.ticker-time){font-size:var(--tv-label);line-height:1.25;letter-spacing:0}
-html:not(.panel-view) .camera-top{top:22%;font-size:18px}
+/* 2026-09-20：22% → 15%。推图条同时被压成一条 8px 的进度条并上移到 y=26，
+ * 顶部一下子空出一大片，机位条跟着往上收，两者才对得上一套版面。
+ * 15% 在 1280×720 逻辑坐标里 = y 108；推图条背板到 y 40，中间留 68px 呼吸。 */
+html:not(.panel-view) .camera-top{top:15%;font-size:18px}
 html:not(.panel-view) .camera-top>span{display:flex;align-items:center;gap:6px}
 html:not(.panel-view) .camera-top b{margin:0}
 html:not(.panel-view) .action-caption{bottom:9%;max-width:68%}

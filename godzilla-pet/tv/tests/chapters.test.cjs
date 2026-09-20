@@ -122,74 +122,70 @@ test('三城拥有不同天空时段与天气表现，且天气绘制读取章�
   assert.equal(new Set(signatures).size, 3);
 });
 
-/* 路线条：轨道与 5 个节点必须**画在同一条线**上，填充的起点必须跟着当前节点走。
+/* 路线条（2026-09-20 第二版）：只有一条进度条，**一个字的文案都没有**。
  *
- * 改前这条轨道是坏的，三种表现同一个根因（2026-09-18 主人报的"进度条不在正确的
- * 节点里、推图指示不亮、一直停在第一章"）：
- *   · 进度条另画在 y=65，和节点（y=44）不是一条线；
- *   · 填充宽度 (w+16)*progress 不含当前节点序号 —— 站在第 2 个区、本区推进 0%
- *     时条子也从最左边铺开；
- *   · 节点之间的连线只在 i<index 时变绿，**正在推进的那一段永远是暗的**。
- * 下面每一条都对着其中一个，回退任何一个都会红。 */
-test('路线条与节点同线，填充跟着当前节点走，章末出口在最后一个区接管', () => {
+ * 上一版是"底板 + 标题 + 5 个 30px 节点方块 + 右栏三行 18px 文字"的 1010×132 大块，
+ * 主人反馈「上面这段信息不好看，简化成一个进度条就好了，文字都去掉，可以靠上一点」。
+ * 所以「零文案」和「压在画面顶部 40px 以内」在这条测试里是**版面契约**，不是风格偏好：
+ * 谁想往这条进度条上加文字、或者把它再往下挪回画面中部，都会红。
+ *
+ * 三条老 bug 的守护仍然保留（2026-09-18 主人报的"进度条不在正确的节点里、
+ * 推图指示不亮、一直停在第一章"）：
+ *   · 填充起点必须跟着当前节点走 —— 宽度里不含 index 的话，站在第 2 个区、
+ *     本区推进 0% 时条子也会从最左边铺开，看着像"快到章末了"；
+ *   · **正在推进的那一段必须是亮的**（填街道色），不能只有走过的段绿；
+ *   · 未到的段必须是暗的。 */
+test('路线条是一条无文案的进度条，靠上、居中、填充跟着当前节点走', () => {
   const draw = (district, progress, gate) => {
     const r = P.routeFor(district, progress), texts = [], rects = [];
-    const env = { currentRoute: () => r, bossChallengeAvailable: () => gate, ctx: { save() {}, restore() {} },
-      rect: (...a) => rects.push(a), text: (...a) => texts.push(a) };
+    const env = { currentRoute: () => r, bossChallengeAvailable: () => gate, W: 1280,
+      ctx: { save() {}, restore() {} }, rect: (...a) => rects.push(a), text: (...a) => texts.push(a) };
     vm.runInNewContext(functionSource('drawCampaignRoute', 'render') + ';drawCampaignRoute();', env);
-    /* 版面 2026-09-20 按反馈整体放大（"进度条太小了，变粗变大，字体也变大"）：
-     * 轨道高 3→10、节点方块 14→30、开闸红圈 20→40、标题字号→22、右栏→18。
-     * 下面每条断言都用**新尺寸**取 rect，缩回去就会红。 */
-    return { r, texts, rects, nodes: rects.filter(a => a[2] === 30 && a[3] === 30), track: rects.filter(a => a[3] === 10) };
+    return {
+      r, texts, rects, seg: 560 / 5,
+      fill: rects.filter(a => a[4] === r.street.color),
+      green: rects.filter(a => a[4] === '#70e7b0'),
+      ticks: rects.filter(a => a[2] === 2 && a[3] === 8 && a[4] === '#071225e6'),
+      red: rects.filter(a => a[4] === '#ff7780'),
+      base: rects.find(a => a[4] === '#2b3d52'),
+    };
   };
 
-  const mid = draw(2, .5, null);           // 第 2 区（index 1），本区推进 50%
-  assert.equal(mid.nodes.length, 5);
+  const mid = draw(2, .5, null);            // 第 2 区（index 1），本区推进 50%
   assert.equal(mid.r.index, 1);
 
-  /* 放大的尺寸单独立一条钉住 —— 这是这次反馈的重点，别被谁"顺手缩回去"。 */
-  assert.equal(mid.nodes[0][2], 30, '节点方块又被缩回去了（30×30 是放大后的尺寸）');
-  assert.ok(mid.track.every(a => a[3] === 10), '轨道高度不再是 10px');
-  assert.ok(mid.texts.some(a => a[3] === 22), '标题字号不再是 22px');
-  assert.ok(mid.texts.some(a => a[3] === 18), '右栏字号不再是 18px');
+  // ① 零文案 —— 这次改动的核心
+  assert.equal(mid.texts.length, 0, '进度条上还有文字，主人已经裁定全部去掉');
+  assert.equal(draw(5, .5, { district: 6 }).texts.length, 0, '开闸时也不许有文字');
 
-  // ① 同一条线：轨道必须落在节点方块的高度范围内
-  const top = mid.nodes[0][1], bottom = top + mid.nodes[0][3];
-  for (const a of mid.track) assert.ok(a[1] >= top && a[1] + a[3] <= bottom,
-    `轨道 y=${a[1]}..${a[1] + a[3]} 跑到节点行（${top}..${bottom}）外面去了`);
+  // ② 靠上 + 居中：全部图形压在 y≤40，条身水平居中
+  assert.ok(mid.rects.every(a => a[1] + a[3] <= 40), '进度条跑出画面顶部 40px 了');
+  assert.ok(mid.base, '找不到进度条底条');
+  assert.equal(mid.base[0] + mid.base[2] / 2, 640, '进度条不再水平居中');
+  assert.equal(mid.base[1], 26, '条身基线不再是 y=26');
 
-  // ② 填充起点跟着当前节点，不是整个轨道的最左边（x0=262、step=140、gap=24）
-  const fill = mid.track.find(a => a[0] === 262 + 1 * 140 + 24 && a[4] === mid.r.street.color);
-  assert.ok(fill, '本区推进的填充没有从当前节点（第 2 个）之后开始');
-  assert.ok(Math.abs(fill[2] - 92 * .5) < 1e-9, '填充长度不是 step−2×gap 的 50%');
+  // ③ 5 段结构留在条上：4 条刻度缝，代替原来的 30px 节点方块
+  assert.equal(mid.ticks.length, 4, '刻度缝不是 4 条（5 段应有 4 个分界）');
 
-  // ③ 正在推进的那一段不是暗的，未到的段才是
-  assert.equal(mid.track.filter(a => a[4] === '#70e7b0').length, mid.r.index, '只有走过的段是绿的');
+  // ④ 填充起点跟着当前节点走（老 bug：从最左边铺开）
+  assert.equal(mid.fill.length, 1, '当前段的填充不是唯一一条');
+  assert.equal(mid.fill[0][0], 360 + 1 * mid.seg + 1, '填充没有从当前节点（第 2 个）之后开始');
+  assert.ok(Math.abs(mid.fill[0][2] - (mid.seg - 2) * .5) < 1e-9, '填充长度不是段宽的 50%');
 
-  const last = draw(5, .5, null);          // 第 5 区（index 4），本章最后一个节点
-  assert.ok(last.track.some(a => a[0] === 822 && a[2] === 56), '最后一个区没有通往下一章的出口');
-  const exit = last.track.find(a => a[0] === 846 && a[4] === last.r.street.color);
-  assert.ok(exit && Math.abs(exit[2] - 28) < 1e-9, '最后一个区的推进度必须填在章末出口里');
-  assert.ok(last.texts.some(a => a[0] === '下一章 · 东京'), '跨章时右栏没有点名第二章');
-  assert.ok(last.texts.some(a => a[0] === '下一城区 · 浅草灯笼街'));
-  assert.ok(last.texts.some(a => a[0].includes('50%')));
-  assert.ok(draw(2, .3, null).texts.some(a => a[0] === '本章 · 大阪'), '章内推进不该点名别的章');
+  // ⑤ 只有走过的段是绿的；正在推进的那一段必须亮
+  assert.equal(mid.green.length, mid.r.index, '绿色段数必须等于走过的区数');
+  assert.equal(draw(3, .2, null).green.length, 2, '第 3 区应有两段绿');
 
-  // ④ 已开闸：当前节点套红圈、右栏转红；未开闸一个红圈都不许有
-  const ring = (d) => d.rects.filter(a => a[2] === 40 && a[3] === 40);
-  const gated = draw(5, 1, { district: 6 });
-  assert.equal(ring(gated).length, 1, '已开闸时当前节点要套一圈红');
-  assert.equal(ring(gated)[0][4], '#ff7780');
-  assert.ok(gated.texts.some(a => a[0] === '下一章 · 东京' && a[4] === '#ff7780'), '跨章且已开闸时右栏要转红');
-  assert.equal(ring(last).length, 0, '未开闸不许出现红圈');
-  // 红色只留给真的跨章：同章内开闸也变红的话，"可以切场景"这个信号就被稀释了
-  assert.ok(draw(2, 1, { district: 3 }).texts.every(a => a[4] !== '#ff7780'),
-    '同章内开闸不该出现跨章红');
+  // ⑥ 本章最后一个区（index 4）：第 5 段照样能填，不再有"章末出口"特例
+  const last = draw(5, .5, null);
+  assert.equal(last.r.index, 4);
+  assert.equal(last.green.length, 4, '第 5 区时前 4 段该是绿的');
+  assert.equal(last.fill[0][0], 360 + 4 * last.seg + 1, '第 5 段的填充起点不对');
+  assert.ok(Math.abs(last.fill[0][2] - (last.seg - 2) * .5) < 1e-9, '第 5 段的推进度没填在段内');
 
-  /* 放大后的底板（y 6..138）不能压到画面上的 LIVE 机位条：实测 .camera-top
-   * 从 y=158 起，中间那 20px 就是这次放大的预算上限（见 .workbuddy/_route-metric.cjs）。
-   * 想再往下长，先重跑那个探针。 */
-  assert.ok(mid.rects.every(a => a[1] + a[3] <= 158), '路线条压到 LIVE 机位条上了');
+  // ⑦ 开闸 → 整条描红边（替代原来的节点红框）；未开闸一条红都不许有
+  assert.equal(draw(5, 1, { district: 6 }).red.length, 4, '已开闸时该有四条红边围成一圈');
+  assert.equal(mid.red.length, 0, '未开闸不许出现红边');
 });
 
 /* 关卡前进按钮的文案。
