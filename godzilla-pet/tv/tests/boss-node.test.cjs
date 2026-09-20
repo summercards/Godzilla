@@ -10,12 +10,18 @@ const panelPreload=fs.readFileSync(path.join(__dirname,'../../panel-preload.js')
  *  - 走进 NODE_APPROACH 即锁存 nodeArmed（随存档落盘），按钮从此常亮；
  *  - Boss 是唯一无重生实体：所有 enemies 回收过滤必须放 bossEntity 过去。
  * 任何一条破了，症状就是主人担心的那种：按钮永不亮 / Boss 永久丢失 / 节点永远到不了。 */
-const LENGTH=4800,NODE_GUARD=390,NODE_APPROACH=970,NODE_LEAD=520,BOSS_IN_RANGE=580;
+const LENGTH=4800,NODE_GUARD=390,NODE_APPROACH=970,W=1280,BOSS_IN_RANGE=1100,BOSS_SCREEN_X=0.80;
+/* 相机稳态：巨兽恒在屏幕 x=425（真实值是 420+140×体型系数，幼兽档 425）。
+ * 测试只关心"登场位落在画面右侧"，所以把相机收敛位钉成常数即可。 */
+const KAIJU_SCREEN_X=425;
 /* 与 game.js:258 的真实出怪保持同构（字段一个不差，gate 是 sentinel() 的判据）。 */
 const makeBoss=x=>({x,y:590-180,type:'sentinel',state:'alive',phase:0,cd:2,hit:0,hp:2200,max:2200,gate:true,fixed:true,id:'boss-sentinel',introDone:false,introStarted:false,introTime:0});
 
 function scenario(px=100){
-  const env={P,LENGTH,G:590,console,panelMode:false,
+  const env={P,LENGTH,W,G:590,console,panelMode:false,
+    sceneZoom:1.25,                                   // 幼兽档镜头（s = 1.25×0.8 = 1.0）
+    clamp:(x,a,b)=>Math.max(a,Math.min(b,x)),
+    cameraTarget:()=>env.p.x-KAIJU_SCREEN_X,          // 相机稳态：巨兽恒在屏幕 425
     data:{district:1,cleared:0,kills:0,dna:0,level:10,meters:0,xp:0,world:{},levels:{power:1,atomic:1,metabolism:1,stride:1}},
     p:{x:px},buildings:[],enemies:[makeBoss(LENGTH-NODE_GUARD)],
     alive:e=>e.state==='alive',
@@ -81,7 +87,9 @@ test('5 · 点下按钮：进入挑战、Boss 就位到降临起点、按钮熄�
   const before=env.saves;
   assert.equal(run('requestNextMap()'),'challenge');
   const boss=env.enemies.find(e=>e.type==='sentinel');
-  assert.equal(boss.x,env.p.x+NODE_LEAD,'armBossIntro 把 Boss 拉到画面外起跳点');
+  const lead=run('bossIntroLead()');
+  assert.equal(boss.x,env.p.x+lead,'armBossIntro 把 Boss 钉到登场位');
+  assert.ok(KAIJU_SCREEN_X+lead*env.sceneZoom*0.8>=W*2/3,'登场位必须落在画面右侧三分之一');
   assert.equal(run('bossChallengeStarted'),true);
   assert.equal(run('bossChallengeAvailable()'),false,'开战后按钮必须熄灭');
   assert.ok(env.saves>before,'requestNextMap 必须 save()（nodeArmed/挑战态落盘）');
@@ -149,4 +157,42 @@ test('10 · 面板形态：没有世界（enemies 恒空），按钮可点必须
   assert.equal(run('bossChallengeAvailable()'),false,'没锁存也没走到 → 不亮（位置判据照常生效）');
   env.data.world.x=3440;
   assert.equal(run('bossChallengeAvailable()'),true,'nodeArmed 尚未落盘但 x 已到节点 → 也算到了（与电视侧 nodeReached 同判据）');
+});
+
+test('11 · 登场位：无论 Boss 原先站在哪，点按钮后都必须被挪到巨兽前方的登场位（2026-09-20 实机"砸在怪兽身上"）',()=>{
+  /* 实机复现：闸门锁存后继续挂机，巨兽已经走过节点一小段（Boss 落在身后 312px）。
+   * 老判据 `|e.x-p.x|>BOSS_IN_RANGE` 不成立 → 不重定位 → Boss 原地砸下 = 砸在巨兽身上。 */
+  const {env,run}=scenario(LENGTH-NODE_GUARD-NODE_APPROACH); // 走到节点
+  run('armNodeGate()');
+  const boss=env.enemies.find(e=>e.type==='sentinel');
+  env.p.x=4410+312;                    // 走过节点 312px，Boss 被 syncBossPost 留在 4410（身后）
+  run('worldChunk=9');run('ensureWorldAhead()');
+  assert.equal(boss.x,4410,'未开战时 Boss 守在节点上（在巨兽身后）');
+  assert.ok(Math.abs(boss.x-env.p.x)<BOSS_IN_RANGE,'这正是老判据"不重定位"的那个窗口');
+  assert.equal(run('requestNextMap()'),'challenge');
+  const lead=run('bossIntroLead()');
+  assert.equal(boss.x,env.p.x+lead,'必须被挪到登场位，不能原地砸在巨兽身上');
+  for(const near of [env.p.x+40,env.p.x-BOSS_IN_RANGE-50,env.p.x+3000]){
+    boss.x=near;boss.introStarted=false;boss.introDone=false;env.boss=boss;run('armBossIntro(boss)');
+    assert.equal(boss.x,env.p.x+lead,`Boss 原在 ${Math.round(near-env.p.x)} 相对位移处，也必须被钉到登场位`);
+  }
+  boss.introStarted=true;const held=env.p.x+lead+120;boss.x=held;env.boss=boss;run('armBossIntro(boss)');
+  assert.equal(boss.x,held,'演出已开始（introStarted）就不再干预，免得把起跳中的 Boss 拽回去');
+});
+
+test('12 · 登场位的数值不变式：按屏幕位置反解，三种体型档都落在右侧 1/3',()=>{
+  const src=game.slice(game.indexOf('const BOSS_SCREEN_X'),game.indexOf('function nodeAnchorXAt'));
+  assert.ok(src.includes('BOSS_IN_RANGE-120'),'登场位上限必须由 BOSS_IN_RANGE 派生（越过 = 点了没反应的死档）');
+  assert.ok(!/NODE_LEAD|BOSS_INTRO_LEAD/.test(game),'别再留第二份登场位常量（写死世界距离会在不同体型漂到画面中间）');
+  /* 三种档位：幼兽镜头拉近（s=1.0）、成体、灾厄体镜头拉远（s≈0.51）。
+   * 写死世界距离的老做法在灾厄体会缩回 68%，按屏幕反解必须都落在右侧 1/3。 */
+  for(const [zoom,kaiju,label] of [[1.25,425,'幼兽'],[1.30,496,'成体'],[0.637,560,'灾厄体']]){
+    const {env,run}=scenario(100);
+    env.sceneZoom=zoom;env.cameraTarget=()=>env.p.x-kaiju;
+    const lead=run('bossIntroLead()');
+    const screenX=kaiju+lead*zoom*0.8;
+    assert.ok(screenX>=W*2/3,`${label}：登场位只落在 ${Math.round(screenX/W*100)}%，不在画面右侧 1/3`);
+    assert.ok(lead>=120,`${label}：登场位 ${lead} 太近，会砸在巨兽身上`);
+    assert.ok(lead<=BOSS_IN_RANGE-120,`${label}：登场位 ${lead} 越过触发半径（${BOSS_IN_RANGE}）会变成"点了没反应"的死档`);
+  }
 });

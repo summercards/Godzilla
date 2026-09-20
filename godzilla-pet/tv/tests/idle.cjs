@@ -153,9 +153,13 @@ for (const level of [1,15,100]) {
   g.state.buildings.length=0;const gate=g.state.enemies.find(e=>e.gate);assert(gate,'恢复的 city 阶段必须生成门卫');
   g.state.enemies.splice(0,g.state.enemies.length,gate);g.state.p.x=gate.x-190;
   assert.equal(g.requestNextMap(),'challenge','近战距离测试应先显式进入 Boss 战');
+  /* 这条测的是「门卫停距 vs 爪击 reach」这个数值关系，与登场位无关。
+   * 开场那一帧会让演出起跳（introStarted=true），此后 armBossIntro 不再干预位置，
+   * 所以先把 Boss 钉到登场位的那一帧跑掉，再把巨兽摆回停距前 190px 来测。 */
+  g.update(1/60);g.state.p.x=gate.x-190;
   g.state.p.cooldowns={beam:9999,stomp:9999,tail:9999,roar:9999};const hp=gate.hp;
   for(let i=0;i<(6+window.SentinelBoss.INTRO.duration)*60&&gate.hp===hp;i++)g.update(1/60);
-  assert(gate.hp<hp,'LV '+level+' 必须能从原门卫停距前走入有效爪击范围');
+  assert(gate.hp<hp,'LV '+level+' 必须能从门卫停距前走入有效爪击范围');
   g.state.enemies.length=0;g.begin('walk');
   for(let i=0;i<60;i++)g.update(1/60);
   assert(g.state.buildings.some(b=>!b.dead),'持续推图时必须始终有可见房屋，不允许空路段');
@@ -210,7 +214,7 @@ console.log('PASS gate melee: LV1/15/100 claws hit with all skills cooling down,
    * 降临演出永远不会开始 = 死档，只能重置。 */
   const started = boot(farSave({ bossChallengeStarted: true, enemies: [{ id: 'boss-sentinel', hp: 1500, state: 'alive', introDone: false, introStarted: false, introTime: 0 }] }));
   const armed = bossOf(started);
-  assert(armed && Math.abs(armed.x - started.state.p.x) <= 580, '已开战读过档，Boss 没落到画面外一步之内：点了没反应 = 死档');
+  assert(armed && Math.abs(armed.x - started.state.p.x) <= 1100, '已开战读过档，Boss 没落到触发半径（BOSS_IN_RANGE=1100）之内：点了没反应 = 死档');
   for (let i = 0; i < Math.ceil((window.SentinelBoss.INTRO.duration + .2) * 60); i++) started.update(1 / 60);
   assert(armed.introDone === true, '已开战读过档之后，降临演出必须能真的演完');
 

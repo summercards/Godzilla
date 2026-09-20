@@ -16,9 +16,9 @@ test('Boss registered parts and generated rig match, and every texture exists',(
 });
 const vm=require('node:vm');
 const game=fs.readFileSync(path.join(__dirname,'../game.js'),'utf8');
-/* updateSentinel 现在用 game.js 的 BOSS_IN_RANGE 判据（与 armBossIntro 同一个数），
- * 沙箱必须把它一起注入 —— 这里写死 580 是**期望值**，改游戏侧常量时要一并改。 */
-const BOSS_IN_RANGE=580;
+/* updateSentinel 现在用 game.js 的 BOSS_IN_RANGE 判据（登场位 bossIntroLead 由它定上限），
+ * 沙箱必须把它一起注入 —— 这里写死 1100 是**期望值**，改游戏侧常量时要一并改。 */
+const BOSS_IN_RANGE=1100;
 function simulation(){const calls={boom:0,save:0,hits:0},env={bossChallengeStarted:true,BOSS_IN_RANGE,window:{SentinelBoss:Boss},G:590,BS:.34,p:{x:4250},rings:[],particles:[],buildings:[],shake:0,slow:0,hitFlash:0,clamp:(n,a,b)=>Math.max(a,Math.min(b,n)),banner(){},sound(k){if(k==='boom')calls.boom++;},save(){calls.save++;},burst(){calls.hits++;},shoot(){},KaijuRig:require('../rig.js')};vm.runInNewContext(game.slice(game.indexOf('function updateSentinel('),game.indexOf('function drawSentinel(')),env);return {env,calls,step:env.updateSentinel};}
 test('Entrance impact fires once across variable dt; completion persists and does not replay',()=>{
  const {step,calls}=simulation(),boss={...e,introDone:false,introStarted:false,introTime:0};

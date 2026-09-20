@@ -92,8 +92,29 @@ function cityTitle(){return currentChapter().title;}
  *
  * 现在的口径：每 LENGTH 是一段路（同 §3.1「一张地图的基准长度」），Boss 守在段末往回 NODE_GUARD；
  * 巨兽走到 NODE_APPROACH 之内就是"到了节点"，没按按钮继续往前走就换下一段 ——
- * 节点永远在巨兽前方，推图可以一直进行下去。下面这四个数只写这一份。 */
-const NODE_GUARD=390,NODE_APPROACH=970,NODE_LEAD=520,BOSS_IN_RANGE=580;
+ * 节点永远在巨兽前方，推图可以一直进行下去。下面这几个数只写这一份。 */
+const NODE_GUARD=390,NODE_APPROACH=970;
+/* 降临触发半径（世界 px）：Boss 落在巨兽这个距离之内，演出才会开始（updateSentinel 判据）。
+ * 1100 是**上限**，实际登场位由 bossIntroLead() 按屏幕位置反解，永远比它小一截。 */
+const BOSS_IN_RANGE=1100;
+/* Boss 登场位：恒定落在画面横向 BOSS_SCREEN_X 处（右侧三分之一的中段）。
+ *
+ * 为什么不写死一个世界距离：镜头的绘制缩放 s = sceneZoom×0.8 从 1.04（幼兽，镜头拉近）
+ * 一路降到 0.51（灾厄体，镜头拉远），同一个世界距离在屏幕上会漂近一倍 —— 写死就变成
+ * "小体型在右边、大体型缩回中间"。所以按**目标屏幕位置**反解世界偏移：
+ *
+ *   世界偏移 = (目标屏 x − 巨兽屏 x) / s
+ *   巨兽屏 x = p.x − cameraTarget()      // 相机稳态值，与 camera 是否已收敛无关
+ *
+ * 第三个约束：登场位必须落在 BOSS_IN_RANGE 之内，越过就是"点了没反应"的死档
+ * （updateSentinel 的接近判据不成立 → 演出永不开始）。所以结果夹在
+ * [120, BOSS_IN_RANGE−120]：下限保证不砸在巨兽身上，上限保证一定能触发。 */
+const BOSS_SCREEN_X=0.80;
+function bossIntroLead(){
+  const s=Math.max(.2,sceneZoom*.8);
+  const kaiju=p.x-cameraTarget();
+  return clamp((W*BOSS_SCREEN_X-kaiju)/s,120,BOSS_IN_RANGE-120);
+}
 function nodeAnchorXAt(x){return (Math.floor(Math.max(0,x)/LENGTH)+1)*LENGTH-NODE_GUARD;}
 function nodeAnchorX(){return nodeAnchorXAt(p.x);}
 /* Boss 是唯一**没有重生机制**的实体：任何"离远了就回收"的过滤、以及存档快照，都必须放它过去。
@@ -132,10 +153,18 @@ function bossChallengeAvailable(){
  * 是同一判据的两条入口 —— 前者负责锁存，后者负责锁存之前的那一帧也认得出来
  * （测试会直接摆坐标再立刻问，不能要求先跑一帧）。 */
 function armNodeGate(){if(!nodeArmed&&!bossChallengeStarted&&nodeReached())nodeArmed=true;}
-/* 让 Boss 站到「从画面外跳进来」的起点：它守在节点上，而巨兽可能已经走过节点一段路
- * （地图无限延伸）。走远了 updateSentinel 的 BOSS_IN_RANGE 判据就不成立、降临演出永远不开始，
- * 玩家看到的只是"点了没反应"。 */
-function armBossIntro(e){if(e&&alive(e)&&e.introDone===false&&Math.abs(e.x-p.x)>BOSS_IN_RANGE)e.x=p.x+NODE_LEAD;}
+/* 把 Boss 钉到「登场位」——画面右侧 BOSS_SCREEN_X 处（换算见 bossIntroLead）。
+ *
+ * 老判据 `Math.abs(e.x-p.x)>BOSS_IN_RANGE` 是个隐式的"设过了就别再设"：Boss 守在节点上、
+ * 而巨兽已经走过节点一小段（闸门锁存之后继续挂机就会这样，差值 < BOSS_IN_RANGE）时它
+ * **不生效**，Boss 就原地砸下来 —— 视觉上正是"直接砸在巨兽身上"（2026-09-20 实机反馈）。
+ * 现在按"当前位置是否就是登场位"判断，与它原先站在哪无关；演出一开始（introStarted）
+ * 就不再干预，免得把已经起跳的 Boss 拽回去。 */
+function armBossIntro(e){
+  if(!e||!alive(e)||e.introDone!==false||e.introStarted)return;
+  const want=p.x+bossIntroLead();
+  if(e.x!==want)e.x=want;
+}
 /* 把 Boss 钉在它守的那一段路的段末（未开战时）。旧档里它丢过或落在身后，这一句同时负责自愈。 */
 function syncBossPost(){
   const e=sentinel();if(!e||!alive(e))return;
@@ -180,8 +209,11 @@ function completeBossChallenge(){
 }
 function requestNextMap(){
   if(bossChallengeAvailable()){
-    const e=sentinel();armBossIntro(e);bossChallengeStarted=true;e.introStarted=false;e.introDone=false;e.introTime=0;
-    e.cd=2;save();hud();banner('摧毁指令已确认','银曜巨人正在降临');return 'challenge';
+    /* 顺序有讲究：先把演出状态清零、再钉登场位。armBossIntro 会因为 introStarted=true
+     * 跳过定位，而 Boss 若正好停在"演出中"的存档上（introStarted 已是 true），
+     * 先钉位就会被守卫挡掉 —— 先清零才保证这一次一定钉得动。 */
+    const e=sentinel();bossChallengeStarted=true;e.introStarted=false;e.introDone=false;e.introTime=0;
+    armBossIntro(e);e.cd=2;save();hud();banner('摧毁指令已确认','银曜巨人正在降临');return 'challenge';
   }
   return false;
 }
