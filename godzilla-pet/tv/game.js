@@ -94,7 +94,8 @@ function cityTitle(){return currentChapter().title;}
  * 巨兽走到 NODE_APPROACH 之内就是"到了节点"，没按按钮继续往前走就换下一段 ——
  * 节点永远在巨兽前方，推图可以一直进行下去。下面这四个数只写这一份。 */
 const NODE_GUARD=390,NODE_APPROACH=970,NODE_LEAD=520,BOSS_IN_RANGE=580;
-function nodeAnchorX(){return (Math.floor(Math.max(0,p.x)/LENGTH)+1)*LENGTH-NODE_GUARD;}
+function nodeAnchorXAt(x){return (Math.floor(Math.max(0,x)/LENGTH)+1)*LENGTH-NODE_GUARD;}
+function nodeAnchorX(){return nodeAnchorXAt(p.x);}
 /* Boss 是唯一**没有重生机制**的实体：任何"离远了就回收"的过滤、以及存档快照，都必须放它过去。
  * 漏一处就是永久丢 Boss（上面那次事故的直接原因），所以这个判断只写在这里一份。 */
 const bossEntity=e=>e.type==='sentinel';
@@ -111,7 +112,22 @@ let bossChallengeStarted=false;
 let nodeArmed=false;
 function nodeReached(){return p.x>=nodeAnchorX()-NODE_APPROACH;}
 function sentinel(){return enemies.find(e=>bossEntity(e)&&e.gate);}
-function bossChallengeAvailable(){const e=sentinel();return !!(e&&alive(e)&&!bossChallengeStarted&&(nodeArmed||nodeReached()));}
+/* 面板形态必须走存档快照：面板是另一个 tv 实例，**不跑 generateWorld、enemies 恒空**，
+ * 直接问 sentinel() 永远得到 undefined —— 表现就是"电视那边闸门早开了，监控器里的
+ * 「摧毁这块区域」却永远是灰的"（2026-09-20 实机：存档里 nodeArmed=true 而按钮灰）。
+ * 快照由 serialize() 每次落盘刷新、sync 每 5 秒推给面板，字段与实时态同源：
+ * nodeArmed / bossChallengeStarted / enemies[].state / x。判据只有这一份，别在 hud 里另写。 */
+function bossChallengeAvailable(){
+  if(panelMode){
+    const w=data.world;
+    if(!w||w.district!==data.district)return false;
+    const x=Number(w.x)||0;
+    const reached=w.nodeArmed===true||x>=nodeAnchorXAt(x)-NODE_APPROACH;
+    const boss=(w.enemies||[]).some(e=>e.id==='boss-sentinel'&&e.state==='alive');
+    return !!(boss&&!w.bossChallengeStarted&&reached);
+  }
+  const e=sentinel();return !!(e&&alive(e)&&!bossChallengeStarted&&(nodeArmed||nodeReached()));
+}
 /* 每帧调用：把"到过节点"这件事记下来。与 bossChallengeAvailable() 里的 nodeReached()
  * 是同一判据的两条入口 —— 前者负责锁存，后者负责锁存之前的那一帧也认得出来
  * （测试会直接摆坐标再立刻问，不能要求先跑一帧）。 */

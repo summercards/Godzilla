@@ -15,7 +15,7 @@ const LENGTH=4800,NODE_GUARD=390,NODE_APPROACH=970,NODE_LEAD=520,BOSS_IN_RANGE=5
 const makeBoss=x=>({x,y:590-180,type:'sentinel',state:'alive',phase:0,cd:2,hit:0,hp:2200,max:2200,gate:true,fixed:true,id:'boss-sentinel',introDone:false,introStarted:false,introTime:0});
 
 function scenario(px=100){
-  const env={P,LENGTH,G:590,console,
+  const env={P,LENGTH,G:590,console,panelMode:false,
     data:{district:1,cleared:0,kills:0,dna:0,level:10,meters:0,xp:0,world:{},levels:{power:1,atomic:1,metabolism:1,stride:1}},
     p:{x:px},buildings:[],enemies:[makeBoss(LENGTH-NODE_GUARD)],
     alive:e=>e.state==='alive',
@@ -129,4 +129,24 @@ test('8 · 回收 tripwire：每一处 enemies 重赋值过滤都必须放行 bo
 test('9 · 面板白名单两侧同集合：nextMap 在电视与面板两头都放行',()=>{
   assert.ok(/\|sound\|nextMap\)/.test(game),'game.js 的 valid 正则必须含 nextMap');
   assert.ok(/const FORWARD = [^\n]*nextMap/.test(panelPreload),'panel-preload 的 FORWARD 必须含 nextMap（09-18 就是这里丢过按钮）');
+});
+
+test('10 · 面板形态：没有世界（enemies 恒空），按钮可点必须从存档快照判（2026-09-20 实机灰按钮）',()=>{
+  const {env,run}=scenario(100);
+  env.panelMode=true;delete env.enemies;         // 面板里连 enemies 都可能没有
+  env.data.world={district:1,x:4722,nodeArmed:true,bossChallengeStarted:false,
+    enemies:[{id:'boss-sentinel',state:'alive',hp:1320}]};
+  assert.equal(run('bossChallengeAvailable()'),true,'nodeArmed 已锁存 + Boss 活着 → 面板按钮必须亮');
+  env.data.world.bossChallengeStarted=true;
+  assert.equal(run('bossChallengeAvailable()'),false,'开战中面板按钮必须熄灭');
+  env.data.world.bossChallengeStarted=false;
+  env.data.world.enemies[0].state='gone';
+  assert.equal(run('bossChallengeAvailable()'),false,'Boss 不在/已倒 → 不亮');
+  env.data.world.enemies[0].state='alive';
+  env.data.world.district=2;
+  assert.equal(run('bossChallengeAvailable()'),false,'快照跨区（旧区残留）→ 不亮');
+  env.data.world={district:1,x:2000,nodeArmed:false,bossChallengeStarted:false,enemies:[{id:'boss-sentinel',state:'alive'}]};
+  assert.equal(run('bossChallengeAvailable()'),false,'没锁存也没走到 → 不亮（位置判据照常生效）');
+  env.data.world.x=3440;
+  assert.equal(run('bossChallengeAvailable()'),true,'nodeArmed 尚未落盘但 x 已到节点 → 也算到了（与电视侧 nodeReached 同判据）');
 });
