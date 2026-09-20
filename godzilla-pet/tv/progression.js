@@ -327,12 +327,28 @@ function stageIndexFor(data) {
   return i;
 }
 
-/* 章节只由累计区域派生；纽约每五区开始新一轮，不影响成长建筑阶段或旧档。 */
+/* 章节只由累计区域派生；纽约每五区开始新一轮，不影响成长建筑阶段或旧档。
+ *
+ * 天气（2026-09-20 主人第三轮反馈：「三个城市的天气也要分别一下，大阪和东京不用下雨」）：
+ * 三章必须落在**三种互不相同**的天气上，且**大阪与东京都不出现降水**。
+ * 改前的组合是 细雨 / 雷暴 / 浓雾 —— 雨系占了两章，画面上看着是"一整个在下雨"。
+ *
+ *   clear   黄昏晴空   —— 不绘制任何天气层（晴空就是晴空）
+ *   thunder 午夜干雷暴 —— 只打闪、不下雨；闪电由 `weather.lightning` 独立驱动
+ *   fog     清晨浓雾   —— 云带层
+ *
+ * `key` 是渲染层的词表（`drawWeather()` 按它分支）；`density` 只对降水系
+ * （rain / storm）有意义，非降水天气一律写 0，免得读者以为它还在控制雨量。
+ * `lightning` 与 `key` **完全解耦** —— `update()` 只看这一个布尔值决定要不要
+ * 排雷击；所以"去掉雨"和"保住闪电"是两件互不影响的事。
+ * 注意：这套 key 与 `WEATHER_RARITY_BOOST` / `WEATHER_CAT_BIAS` 的数值词表
+ * （bloodmoon / silent / storm）仍然对不上，接 `weatherNow()` 之前要先对齐
+ * —— 见 `doc/游戏逻辑梳理.md` 7.4。 */
 const CHAPTERS = [
   {
     key: 'osaka', number: 1, name: '大阪', title: '第一章 · 大阪',
     sky: ['#160e2c', '#493354', '#b07763'], skyline: ['#35283f', '#52354a', '#654351'],
-    skyTime: 'dusk', weather: { key: 'rain', label: '黄昏细雨', color: '#8dc6ef', density: 0.62, lightning: false },
+    skyTime: 'dusk', weather: { key: 'clear', label: '黄昏晴空', color: '#ffb27a', density: 0, lightning: false },
     wall: '#8b766c', accent: '#ffad68', road: '#343044', water: '#254854',
     landmarks: ['大阪城', '通天阁', '道顿堀霓虹'],
     districts: [
@@ -346,7 +362,7 @@ const CHAPTERS = [
   {
     key: 'tokyo', number: 2, name: '东京', title: '第二章 · 东京',
     sky: ['#07112f', '#18366a', '#586a97'], skyline: ['#132344', '#20385b', '#304c75'],
-    skyTime: 'night', weather: { key: 'storm', label: '午夜雷暴', color: '#84dfff', density: 1, lightning: true },
+    skyTime: 'night', weather: { key: 'thunder', label: '午夜干雷暴', color: '#84dfff', density: 0, lightning: true },
     wall: '#3c5675', accent: '#75cfff', road: '#172c49', water: '#163e68',
     landmarks: ['东京塔', '高架轨道', '新宿霓虹'],
     districts: [

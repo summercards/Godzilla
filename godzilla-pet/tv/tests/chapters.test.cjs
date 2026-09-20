@@ -38,7 +38,7 @@ test('每城五个街区拥有独立颜色与招牌，不复用固定东京招�
   assert.equal(P.CHAPTERS.length, 3);
   assert.equal(new Set(P.CHAPTERS.map(c => c.sky.join())).size, 3);
   assert.deepEqual(P.CHAPTERS.map(c => c.skyTime), ['dusk','night','dawn']);
-  assert.deepEqual(P.CHAPTERS.map(c => c.weather.key), ['rain','storm','fog']);
+  assert.deepEqual(P.CHAPTERS.map(c => c.weather.key), ['clear','thunder','fog']);
   assert.equal(new Set(P.CHAPTERS.map(c => c.weather.label)).size, 3);
   for (const c of P.CHAPTERS) {
     assert.equal(new Set(c.districts.map(d => d.name)).size, 5);
@@ -104,22 +104,86 @@ test('像素地标与路面三城绘制分支不同，地标整段保持在视�
   assert.equal(new Set(signatures).size,3);
 });
 
-test('三城拥有不同天空时段与天气表现，且天气绘制读取章节配置', () => {
-  const signatures = [];
-  for (const district of [1, 6, 11]) {
-    const commands = [], r = P.routeFor(district);
+/* 天气层契约（2026-09-20 主人第三轮反馈）：
+ * 「三个城市的天气也要分别一下，大阪和东京不用下雨。」
+ *
+ * 改前是 细雨 / 雷暴 / 浓雾 —— 雨系占了两章。改后 晴空 / 干雷暴 / 浓雾。
+ * 这里钉三件事，任何一条破了都会红：
+ *   ① 三章天气层**互不相同**（`new Set(...).size === 3`）；
+ *   ② 大阪与东京**都不出现雨丝** —— 这条不是风格偏好，是主人原话；雨丝是带
+ *      alpha 后缀（'b3' / '80'）的斜线，是降水系**独有**的画法，拿它当判据；
+ *   ③ 东京虽然不下雨，**闪电必须还在** —— 干雷暴的"干"只免掉降水，
+ *      `weather.lightning` 与 `key` 是解耦的两件事。
+ * 另外补一条覆盖率：降水系渲染器当前三章都不用（等于暂时没有调用方），
+ * 所以这里用合成章节直接把 rain 分支跑一遍 —— 免得它变成没人看管的死代码。 */
+test('三城天气互不相同，大阪晴空、东京干雷暴、纽约浓雾，且大阪与东京都不下雨', () => {
+  /* 抓绘制指令时**连当时的 globalAlpha 一起记**。只记颜色不够 ——
+   * 云是"色值 × alpha"叠到夜空上的，两者得一起看（见下面那条对比度断言）。 */
+  const layer = (chapter) => {
+    const commands = [];
+    const state = { alpha: 1 };
     const env = {
-      currentChapter: () => r.chapter, camera: 0, time: 3, G: 590, W: 1280, H: 720,
+      currentChapter: () => chapter, camera: 0, time: 3, G: 590, W: 1280, H: 720,
       lightning: .2, bolt: [[100, 0], [120, 80]],
-      ctx: { globalAlpha: 1 },
-      rect: (...args) => commands.push(['rect', ...args]),
-      line: (...args) => commands.push(['line', ...args]),
+      ctx: { get globalAlpha() { return state.alpha; }, set globalAlpha(v) { state.alpha = v; } },
+      rect: (...args) => commands.push(['rect', ...args, state.alpha]),
+      line: (...args) => commands.push(['line', ...args, state.alpha]),
     };
     vm.runInNewContext(functionSource('drawWeather','drawCampaignRoute') + ';drawWeather();', env);
-    assert(commands.length > 0, '每张地图必须绘制天气层');
-    signatures.push(JSON.stringify(commands));
+    return commands;
+  };
+  /* 雨丝 = line(斜线, 天气色+'b3'|'80', 宽)。非降水天气不会有任何带 alpha 后缀的线。 */
+  const rainStreak = (c) => c[0] === 'line' && typeof c[2] === 'string' && /(?:b3|80)$/.test(c[2]);
+
+  const osaka = layer(P.CHAPTERS[0]), tokyo = layer(P.CHAPTERS[1]), ny = layer(P.CHAPTERS[2]);
+
+  assert.equal(osaka.length, 0, '大阪是晴空：不该绘制任何天气层');
+  assert.equal(osaka.some(rainStreak), false, '大阪是晴空：不该有雨丝');
+  assert.equal(tokyo.some(rainStreak), false, '东京是干雷暴：一滴雨都不许有');
+  assert.equal(ny.some(rainStreak), false, '纽约是浓雾：不该有雨丝');
+
+  assert.ok(ny.length > 0, '纽约必须有雾层');
+  assert.ok(tokyo.some(c => c[0] === 'line' && c[2] === '#668dff'), '东京干雷暴必须保留闪电折线');
+  assert.ok(tokyo.some(c => c[0] === 'rect' && c[5] === '#758cfa'), '东京必须保留全屏闪电闪光');
+  assert.equal(tokyo.some(rainStreak), false, '东京的阴云不许退回降水');
+
+  /* 东京的云必须**真的看得见**。
+   *
+   * 这里量的是**混色对比度** = alpha × Δluma(云色, 该章天空顶色)，
+   * 也就是云叠到夜空上之后，实际比夜空亮出多少。
+   *
+   * 为什么不用"云色比天空亮"这种更简单的判据：那个判据**拦不住**曾经那版。
+   * 曾经用 #2b3a55（luma 56.6，确实比夜空顶色 #07112f 的 17.4 亮）、alpha .17，
+   * 简单判据照样通过，但实测可见度只有纽约雾的 0.25 倍 —— 云发灰、几乎融进夜空。
+   * 对比度才能反映眼睛看到的东西：
+   *   · #2b3a55 @.17 → 6.7  → 冻结帧实测 mean 0.95（纽约雾 3.82 的 0.25 倍）
+   *   · #5d7099 @.20 → 18.7 → 冻结帧实测 mean 3.30（纽约雾的 0.86 倍）
+   * 阈值 12 落在两者之间，把"发灰"那一档挡住。 */
+  const luma = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114;
+  };
+  const cloudRects = tokyo.filter(c => c[0] === 'rect' && c[5] !== '#758cfa');   // 排除全屏闪光那一块
+  assert.ok(cloudRects.length > 0, '东京干雷暴必须画出云');
+  const skyTop = luma(P.CHAPTERS[1].sky[0]);
+  for (const c of cloudRects) {
+    const alpha = c[6];                                        // 绘制那一刻的 globalAlpha
+    const contrast = alpha * (luma(c[5]) - skyTop);
+    assert.ok(contrast >= 12,
+      `云色 ${c[5]} @alpha ${alpha} 的混色对比度只有 ${contrast.toFixed(1)}（要求 ≥12）——`
+      + ` 云会发灰、几乎融进夜空（曾经 #2b3a55 @.17 = 6.7，实测可见度只有纽约雾的 0.25 倍）`);
   }
-  assert.equal(new Set(signatures).size, 3);
+  assert.ok(new Set(cloudRects.map(c => c[5])).size >= 2, '云要有明暗两层，不能是一整片平色');
+
+  assert.equal(new Set([osaka, tokyo, ny].map(c => JSON.stringify(c))).size, 3, '三城天气层必须互不相同');
+
+  /* 降水系渲染器仍可用：density 必须真的改变雨量（否则"密度"就是装饰）。
+   * 注意传的是 **chapter**（`drawWeather` 读的是 `currentChapter().weather`），
+   * 传成 weather 本身会静默落到默认分支、画出一片空 —— 那就测了个寂寞。 */
+  const streaksAt = (density) => layer({ weather: { key: 'rain', color: '#8dc6ef', density, lightning: false } }).filter(rainStreak).length;
+  assert.equal(streaksAt(0), 0, 'density 0 不该有雨');
+  assert.ok(streaksAt(.5) > 0, 'density .5 必须有雨');
+  assert.ok(streaksAt(1) > streaksAt(.5), '密度必须真的改变雨量');
 });
 
 /* 路线条（2026-09-20 第二版）：只有一条进度条，**一个字的文案都没有**。

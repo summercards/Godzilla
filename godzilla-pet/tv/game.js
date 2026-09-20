@@ -677,17 +677,53 @@ for(let pass=0;pass<3;pass++){let col=['#b51a06','#ff5a1e','#ffb43a'][pass],wide
 line([[x,y],[ex,ey]],'#ffe9a8',5+(superB?3:0));
 for(let i=0;i<8;i++){let t=(i/8+(time*0.35)%1)%1;let bx=x+dx*t,by=y+dy*t,flick=Math.sin(time*30+i*2)*12;rect(bx+nx*flick-2,by+ny*flick-2,5,5,['#ffd36b','#ff7a1e','#ff3c10'][i%3]);}}
 function drawParticles(){for(let a of particles){ctx.globalAlpha=clamp(a.life/(a.smoke?1.8:.3),0,1);let x=a.x-camera;rect(x-a.size/2,a.y-a.size/2,a.size,a.size,a.color);if(!a.smoke&&a.size>7)rect(x,a.y,a.size*.35,a.size*.35,'#ffe6a0');if(a.smoke)rect(x-a.size*.3,a.y-a.size*.7,a.size*.6,a.size*.35,a.color);}ctx.globalAlpha=1;for(let r of rings){ctx.globalAlpha=Math.min(1,r.life);ctx.strokeStyle=r.color;ctx.lineWidth=r.type==='blast'?9:4;ctx.beginPath();ctx.ellipse(r.x-camera,r.y,r.r,r.type==='stomp'?r.r*.17:r.r,0,0,Math.PI*2);ctx.stroke();}ctx.globalAlpha=1;for(let f of floaters){ctx.globalAlpha=Math.min(1,f.life);text(f.text,f.x-camera,f.y,13,f.color,'center');}ctx.globalAlpha=1;}
+/* 天气层。三分支互斥，**每个分支都必须点名自己的 key** —— 改前是
+ * `if(rain||storm){雨} else {雾}`，于是任何新 key（比如干雷暴）都会静默掉进
+ * 雾分支。那种"未知 key 自动降级成雾"的写法不会报错，只会让画面悄悄长错，
+ * 和 CSS 里被特指度吃掉的 `top` 是同一类 bug。
+ *
+ * 2026-09-20 主人反馈「三个城市的天气也要分别一下，大阪和东京不用下雨」：
+ *   · 大阪  clear   —— 不画任何天气层（晴空就是晴空，reveal 出天空渐变本身）
+ *   · 东京  thunder —— 只有压顶乌云 + 闪电，**一滴雨都不下**
+ *   · 纽约  fog     —— 云带层（原样）
+ * 降水系（rain / storm）保留可用，但当前三章都不再用它。
+ *
+ * `lightning` 与 key 解耦：只要 weather.lightning 为真就在这里画闪电，与下不下雨无关。 */
 function drawWeather(){
-  const weather=currentChapter().weather||{key:'rain',color:'#8dc6ef',density:.62,lightning:false};
+  const weather=currentChapter().weather||{key:'clear',color:'#ffb27a',density:0,lightning:false};
   if(weather.key==='rain'||weather.key==='storm'){
     const count=Math.round(200*weather.density);
     for(let i=0;i<count;i++){let speed=430+i%5*90,x=((i*97-time*speed*.26-camera*.15)%1400+1400)%1400-40,y=(i*61+time*speed)%760-20;line([[x,y],[x-5-i%3,y+15+i%4*4]],i%4===0?weather.color+'b3':weather.color+'80',i%4===0?2:1);}
     for(let i=0;i<Math.round(32*weather.density);i++){let x=(i*153+Math.floor(time*8)*17)%1280,y=G+2+i%5*6,phase=(time*3+i*.2)%1;ctx.globalAlpha=(1-phase)*.45;line([[x-6*phase,y-2*phase],[x,y-6*phase],[x+6*phase,y-2*phase]],weather.color,2);}
-  } else {
+  } else if(weather.key==='fog'){
     ctx.globalAlpha=.12;
     for(let i=0;i<7;i++){let x=((i*241-time*9-camera*.04)%1500+1500)%1500-100,y=150+i%4*95;rect(x,y,260+i%3*90,34,weather.color);rect(x+40,y-18,150,42,weather.color);}
     ctx.globalAlpha=1;
+  } else if(weather.key==='thunder'){
+    /* 干雷暴的云：蓝灰亮色 + 低 alpha，做出"云被远处闪电与城市灯光从下方映亮"
+     * 的体积感 —— 每朵云三层横向错落，轮廓有起伏，和纽约那种平铺雾带明显不同。
+     * 固定色而不是 weather.color：天气色是给闪电/降水用的，云不该被染青。
+     *
+     * 这两个色值 + .20 的 alpha 是**量出来的**，不是手感：
+     *   `ctx.globalAlpha = .20` → 云相对夜空的混色对比度 = alpha × Δluma
+     *   = .20 × (110.9 − 17.4) ≈ 18.7。
+     * 对比度决定可见度 —— 冻结帧 A/B 实测天气层像素差：
+     *   · 本版 18.7 → mean 3.30，是纽约雾（3.82）的 **0.86 倍**，同一量级；
+     *   · 更早那版用 #2b3a55 / alpha .17（对比度只有 6.7）→ mean 0.95，
+     *     只有纽约雾的 **0.25 倍**，云发灰、几乎融进夜空。
+     * 所以「混色对比度 ≥ 12」成了 `tv/tests/chapters.test.cjs` 里的硬门禁：
+     * 谁把颜色调暗（或把 alpha 调低）都会被拦下。 */
+    ctx.globalAlpha=.20;
+    for(let i=0;i<6;i++){
+      const bx=((i*271-time*6-camera*.03)%1660+1660)%1660-150, by=88+i%3*56;
+      rect(bx,by,300+i%3*120,40,'#5d7099');
+      rect(bx+60,by-20,190,46,'#4a5b83');
+      rect(bx+150,by-34,120,40,'#5d7099');
+    }
+    ctx.globalAlpha=1;
   }
+  /* weather.key==='clear' 落到这里：什么都不画。未知 key 同样什么都不画 ——
+   * 宁可让画面"没有天气"，也不要静默降级成另一城的天气。 */
   if(weather.lightning&&lightning>0){ctx.globalAlpha=lightning*1.8;rect(0,0,W,H,'#758cfa');ctx.globalAlpha=1;line(bolt,'#668dff',10);line(bolt,'#eaf6ff',4);if(bolt.length>5)line([bolt[3],[bolt[3][0]+100,150],[bolt[3][0]+130,230]],'#99baff',3);}
   ctx.globalAlpha=1;
 }
