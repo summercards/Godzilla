@@ -43,8 +43,19 @@ button:disabled{cursor:default}h1,h2,h3,h4,p{font-weight:400;margin:0}
 .chan-btn>b{display:grid;place-items:center;width:24px;height:24px;background:#0c0e13;color:var(--cyan);
   border:2px solid #2f6d7c;font-size:13px}
 .chan-btn:hover{background:#23272f;border-color:#6f7a8a}
-.chan-btn.on{background:#10303a;border-color:#46c7d8;color:#dffbff;box-shadow:4px 4px 0 #05222a}
-.chan-btn.on>b{color:#0c0e13;background:var(--cyan)}
+/* 这里原本有 `.chan-btn.on{background:#10303a;border-color:#46c7d8;color:#dffbff;…}`
+ * 与 `.chan-btn.on>b{color:#0c0e13;background:var(--cyan)}` —— 换到非直播频道时
+ * 把按钮整体染成青色的一套「选中态」。2026-09-20 按反馈删掉：
+ * 主人原话「这个直播按钮，点一下会变化。不用变成其它样式。直接找个样式就可以了。」
+ * 也就是说这个按钮**不要有状态样式**，恒定用上面 `.chan-btn` 那套即可。
+ * 连带把 game.js 里的 `classList.toggle('on')` 一起去了 —— 光删 CSS 会留下
+ * 一个永远不生效的类切换（和本文件里那三条 `.camera-top{top}` 死值同一类问题）。
+ *
+ * 代价说清楚：现在**无法从按钮外观看出当前在不在直播频道**。
+ * 判断依据还剩三条，都不是专门为这个做的：按钮上恒定的「直播」二字、
+ * 画面本身（非直播画的是整屏节目/雪花，与城市直播完全不同）、
+ * 以及切台时那条 notice 播报。如果以后要补回可视提示，
+ * 请新加一条**看得懂意思**的样式，不要把上面那两条原样搬回来。 */
 .tv-knobs{display:flex;align-items:center;gap:12px;margin-top:auto;padding:6px 4px 2px;justify-content:center}
 .tv-knobs .knob{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#5a6070,#1b1e25 70%);
   box-shadow:inset 0 0 0 3px #0c0e13,0 2px 0 #0007;border:2px solid #0c0e13}

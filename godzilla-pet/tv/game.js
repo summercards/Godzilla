@@ -772,7 +772,14 @@ const PROGRAMS={
  * 切回直播即恢复游戏画面。 —— idle.cjs 默认停在直播频道，不会触发 drawChannel。 */
 function channelName(ch){return ch==='live'?'直播':PROGRAMS[ch]?.label||ch;}
 const CHANNEL_ORDER=['live','news','variety','drama','anime','documentary','weather'];
-function setChannel(ch){channel=ch;channelNoise=.32;channelFlash=.12;channelCanvas.hidden=(ch==='live');$('stage').classList.toggle('channel-active',ch!=='live');let cyc=$('chan-cycle');if(cyc){cyc.classList.toggle('on',ch!=='live');let sp=cyc.querySelector('span');if(sp)sp.textContent=channelName(ch);}audioInit();noise(.16,.22,2400);tone(ch==='live'?180:92,.12,'square',.08, ch==='live'?320:55);if(ch==='live')notice('已返回 GNN 主直播');else notice('正在接收 '+channelName(ch)+' · '+PROGRAMS[ch].short);}
+/* 2026-09-20 按反馈去掉了「转台」按钮的状态变化。原来是两处一起变：
+ *   ① `cyc.classList.toggle('on', ch!=='live')` → CSS 把按钮染成青色；
+ *   ② `sp.textContent=channelName(ch)` → 按钮上的字从「直播」变成频道名。
+ * 主人原话「这个直播按钮，点一下会变化。不用变成其它样式。直接找个样式就可以了。
+ * 字也不用变」—— 两条都不要。所以这个按钮现在**外观与文字都是恒定的**，
+ * 换台只影响画面本身（channelCanvas）与播报，不再回写按钮。
+ * 对应的 `.chan-btn.on` 两条 CSS 规则也一并删了（只删一边会留下死代码）。 */
+function setChannel(ch){channel=ch;channelNoise=.32;channelFlash=.12;channelCanvas.hidden=(ch==='live');$('stage').classList.toggle('channel-active',ch!=='live');audioInit();noise(.16,.22,2400);tone(ch==='live'?180:92,.12,'square',.08, ch==='live'?320:55);if(ch==='live')notice('已返回 GNN 主直播');else notice('正在接收 '+channelName(ch)+' · '+PROGRAMS[ch].short);}
 function cycleChannel(){let i=(CHANNEL_ORDER.indexOf(channel)+1)%CHANNEL_ORDER.length;setChannel(CHANNEL_ORDER[i]);}
 function channelLabel(g,title,ch,accent='#9decef',sub=''){g.fillStyle='#071426';g.fillRect(0,0,1280,82);g.fillStyle=accent;g.fillRect(0,78,1280,4);g.fillStyle=accent;g.font='26px Pixel, monospace';g.textAlign='left';g.fillText(title,30,43);g.fillStyle='#fff';g.font='18px Pixel, monospace';g.fillText(sub,30,68);g.fillStyle=accent;g.fillRect(1168,18,84,40);g.fillStyle='#071426';g.font='22px Pixel, monospace';g.textAlign='center';g.fillText(ch,1210,45);g.textAlign='left';}
 function presenter(g,x,y,name,color){g.fillStyle=color;g.fillRect(x,y,150,230);g.fillStyle='#f0c19b';g.fillRect(x+35,y+28,80,80);g.fillStyle='#1b243c';g.fillRect(x+23,y+112,105,118);g.fillStyle='#fff';g.font='18px Pixel, monospace';g.fillText(name,x+18,y+260);}
