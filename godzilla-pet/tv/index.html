@@ -30,7 +30,11 @@
      2026-09-17 按反馈移除：那是数值面板的活，摆在直播画面上既挡画面
      又是重复信息。数字本身仍在遥控器的观测面板里，与以前完全一致。 -->
 <div class="camera-top"><span><b>LIVE</b><span id="location">东京</span></span><span class="camera-id">AIR CAM 07 <i>●</i> <span id="clock">23:47:00</span></span></div>
-<div class="inset"><div><i></i>地面机位 <span>CAM 02</span></div><canvas id="monitor" width="240" height="130" aria-label="地面机位同步近景"></canvas></div>
+<!-- 这里原来还有一块「地面机位 CAM 02」同步近景小窗（<canvas id="monitor">）。
+     2026-09-20 按反馈去掉：它是画面右上角的第二块屏幕，和主画面抢注意力，
+     信息量却和主画面完全重复（同一个 buffer 的裁切）。连带清掉的东西：
+     game.js 里的 monitor 上下文与绘制、style.css 的 .inset 规则、
+     tv-config.js 的面板隐藏清单，以及两处播报文案里的"地面机位"字样。 -->
 <div class="action-caption"><span id="actionLabel">持续跟踪</span><small id="actionSub">目标正在向城市深处移动</small></div><div class="event-banner" id="eventBanner" hidden></div>
 <div class="lower-third" id="lowerThird" hidden><div class="breaking"><span>BREAKING</span><b>突发新闻</b></div><div class="headline"><span id="headlineTag">东京紧急报道 / 持续更新</span><div class="headline-viewport"><h1 id="headline">巨型生物现身新宿，防卫军紧急集结</h1></div><p id="headlineDetail">本台将持续跟踪现场</p></div><div class="live-bug"><b>GNN</b><span>现场直击</span></div></div>
 <div class="ticker"><b>最新消息</b><div class="ticker-clip"><div class="ticker-track" id="tickerTrack"><span id="tickerText"></span><span id="tickerCopy" aria-hidden="true"></span></div></div><span class="ticker-time" id="tickerTime">LIVE</span></div>

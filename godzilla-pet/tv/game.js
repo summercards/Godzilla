@@ -1,7 +1,7 @@
 'use strict';
 (() => {
-const $=id=>document.getElementById(id),canvas=$('game'),out=canvas.getContext('2d'),monitor=$('monitor').getContext('2d'),channelCanvas=$('channel'),channelCtx=channelCanvas.getContext('2d');
-const buffer=document.createElement('canvas');buffer.width=640;buffer.height=360;const ctx=buffer.getContext('2d');ctx.imageSmoothingEnabled=out.imageSmoothingEnabled=monitor.imageSmoothingEnabled=false;
+const $=id=>document.getElementById(id),canvas=$('game'),out=canvas.getContext('2d'),channelCanvas=$('channel'),channelCtx=channelCanvas.getContext('2d');
+const buffer=document.createElement('canvas');buffer.width=640;buffer.height=360;const ctx=buffer.getContext('2d');ctx.imageSmoothingEnabled=out.imageSmoothingEnabled=false;
 const W=1280,H=720,G=590,LENGTH=4800,SAVE='gnn-kaiju-idle-v3',P=window.IdleProgression;
 /* 火焰 / 烟尘的体型缩放 —— 跟着体型走，但**锁在 25 级那一刻的大小**。
  *
@@ -94,6 +94,10 @@ function cityTitle(){return currentChapter().title;}
  * 巨兽走到 NODE_APPROACH 之内就是"到了节点"，没按按钮继续往前走就换下一段 ——
  * 节点永远在巨兽前方，推图可以一直进行下去。下面这几个数只写这一份。 */
 const NODE_GUARD=390,NODE_APPROACH=970;
+/* Boss 倒地演出时长（秒）：defeat() 把它推入 'falling'，updateEnemies 用它判定
+ * "该结算了"。**同时是换场雪花的时间轴基准** —— 世界替换必须落在雪花糊满屏幕的
+ * 那个窗口里（见 SCENE_SWITCH 与 tests/scene-switch.test.cjs 的不变式）。 */
+const BOSS_FALL=2.4;
 /* 降临触发半径（世界 px）：Boss 落在巨兽这个距离之内，演出才会开始（updateSentinel 判据）。
  * 1100 是**上限**，实际登场位由 bossIntroLead() 按屏幕位置反解，永远比它小一截。 */
 const BOSS_IN_RANGE=1100;
@@ -114,6 +118,80 @@ function bossIntroLead(){
   const s=Math.max(.2,sceneZoom*.8);
   const kaiju=p.x-cameraTarget();
   return clamp((W*BOSS_SCREEN_X-kaiju)/s,120,BOSS_IN_RANGE-120);
+}
+/* —— 关底（Boss）血量：按「目标击杀时长」反解，不是一个写死的基数 ——
+ *
+ * 为什么必须反解：Boss 是唯一"必须打赢才能继续"的实体，而这个产品没有血条、
+ * 没有死亡、不引入失败状态 —— 所以它**不能被设计成打不过**。血量只能锚在
+ * 巨兽自己的输出上，才能让每一档等级、每一种加点都稳定落在同一段时长里。
+ *
+ * 写死基数会随等级一路漂移。2026-09-20 实测（.workbuddy/_boss-ttk.cjs，
+ * 无头沙箱真打一场，数帧数到 Boss 不再 alive）：
+ *   LV10 / 第4区 / 全投力量   → 47.7s
+ *   LV40 / 第12区 / 全投力量  → 15.1s（一次尾扫 7027 直接秒杀 6798 血）
+ *   LV120/ 第27区 / 全投力量  → 15.1s（同上）
+ * 后两档的时长等于**尾扫冷却**，和血量毫无关系 —— 越到后期越"没挑战"，
+ * 正是主人这次反馈的现象。
+ *
+ * 参考每秒伤害只取**真能打到关底**的三个动作。关底停距在 340~520px（由巨兽
+ * 体型与挡路建筑决定）：爪击 reach 135 够不着，长啸 850 够得着但权重很小、略去。
+ * 权重一律写成「一次伤害 ÷ 一轮周期」，每一项都由别处的既有常量推出来：
+ *   重踏 power×2.8 /（12s 冷却 + 1.68s 动作）
+ *   尾扫 power×2.2 /（15s 冷却 + 1.65s 动作）
+ *   吐息 atomic×2.6s 有效窗口 / 28s 冷却
+ *
+ * BOSS_TTK_CAL 是与实测对齐的标定系数：上面算的是"理想站桩输出"，实际还有走位、
+ * 被挡路建筑拖住、被 Boss 重拳打断（p.stagger 会冻住动作计时），打折之后才落地。
+ * 改这里的公式、或改上面那些冷却/倍率，**必须重跑 _boss-ttk.cjs 重新标定**。 */
+const BOSS_HP_BASE=2200;   /* 双重身份：血量的下限，同时也是旧档迁移的换算基准（见 bossLegacyMax） */
+const BOSS_TTK_TARGET=60,BOSS_TTK_CAL=.5,BOSS_TTK={stomp:2.8/13.68,tail:2.2/16.65,beam:2.6/28};
+function bossRefDps(){return (economy.power()*(BOSS_TTK.stomp+BOSS_TTK.tail)+economy.atomic()*BOSS_TTK.beam)*BOSS_TTK_CAL;}
+function bossMaxHp(){return Math.max(BOSS_HP_BASE,Math.round(bossRefDps()*BOSS_TTK_TARGET));}
+/* 旧档迁移用的基准：改动前 Boss 血量是 `2200 × Ke(区) × (村庄 ×0.6)`。
+ * 存档快照里只存了 hp、没存 max，所以回读时得靠它把"剩下的绝对血量"换算成比例，
+ * 否则读一次旧档就会把血条当成满的。 */
+function bossLegacyMax(district,village){return BOSS_HP_BASE*P.Ke(district)*(village?.6:1);}
+/* —— 换场：电视转台式的全屏雪花，取代原来的硬切 ——
+ *
+ * 原来的换场是"世界替换"和"画面替换"同一帧发生：Boss 落地 → 直接 generateWorld()
+ * → 下一区第一帧就顶上来。观感是硬切，玩家会以为画面跳了一下（2026-09-20 反馈）。
+ *
+ * 现在的口径：雪花从 Boss **倒地那一刻**（defeat 把它推入 'falling'）就开始爬升，
+ * 世界替换仍然发生在 BOSS_FALL 那一拍 —— 只要它落在 [rise, rise+hold] 区间里，
+ * 替换那一帧屏幕就被雪花**完全糊满**，玩家看不到任何"换"的动作。随后经过 fall
+ * 散开，露出新区域。所以这条链上真正的契约是三个数的大小关系：
+ *
+ *     rise ≤ BOSS_FALL ≤ rise+hold
+ *
+ * 它被 tests/scene-switch.test.cjs 用一个会失败的断言钉住（改了这边忘了那边就红）。
+ * 单独把 rise 拉长到 BOSS_FALL 之后、或把 hold 压到 0，都会让"硬切"重新露出来 ——
+ * 而那种时候画面只是看起来"有点闪"，不会报错，正是最该由断言盯住的一类回归。
+ *
+ * 雪花画在画布上，所以画面上的 DOM 浮层（机位条 / 字幕 / 滚动条 / 横幅）必须靠
+ * #stage.scene-switching 一起让位，否则横幅会浮在雪花上面 —— 一眼看出是"遮罩"
+ * 而不是"转台"。样式见 tv/style.css。 */
+const SCENE_SWITCH={rise:1.6,hold:1.2,fall:.75};
+let sceneSwitch=null;
+/* 雪花的不透明度曲线，纯函数、不碰任何状态 —— 换场那一拍是否"遮满"就由它判定。 */
+function sceneSwitchAlpha(t){
+  const {rise,hold,fall}=SCENE_SWITCH;
+  if(!(t>0))return 0;
+  if(t<rise)return t/rise;
+  if(t<rise+hold)return 1;
+  if(t<rise+hold+fall)return 1-(t-rise-hold)/fall;
+  return 0;
+}
+function sceneSwitchDone(t){return t>=SCENE_SWITCH.rise+SCENE_SWITCH.hold+SCENE_SWITCH.fall;}
+function sceneSwitchSpan(){return SCENE_SWITCH.rise+SCENE_SWITCH.hold+SCENE_SWITCH.fall;}
+/* 每次进入换场都从 0 重新计时（同一帧里重复调用是幂等的，不会叠加两段雪花）。 */
+function beginSceneSwitch(){
+  sceneSwitch={t:0};
+  $('stage').classList.add('scene-switching');
+  noise(1.1,.3,2600);tone(58,.5,'square',.05,30);
+}
+function endSceneSwitch(){
+  sceneSwitch=null;
+  $('stage').classList.remove('scene-switching');
 }
 function nodeAnchorXAt(x){return (Math.floor(Math.max(0,x)/LENGTH)+1)*LENGTH-NODE_GUARD;}
 function nodeAnchorX(){return nodeAnchorXAt(p.x);}
@@ -228,7 +306,7 @@ const skyline=[];for(let layer=0;layer<3;layer++){let a=[],x=-100;while(x<7800){
 /* 这里只留玩法数值。单位的显示名、资产目录、绘制函数一律从
  * assets/asset-index.js 取，避免同一批单位身份散落在代码与资产清单两处。 */
 const TYPES={tank:{hp:90,resistance:.07,reward:20},heli:{hp:80,resistance:.06,reward:24},rocket:{hp:160,resistance:.13,reward:35},gunship:{hp:230,resistance:.19,reward:48},aegis:{hp:360,resistance:.31,reward:65},mech:{hp:600,resistance:.45,reward:100},
-  jet:{hp:70,resistance:.05,reward:18},drone:{hp:38,resistance:.03,reward:11},walker:{hp:340,resistance:.28,reward:55},bunker:{hp:430,resistance:.34,reward:62},sentinel:{hp:2200,resistance:1.1,reward:500}};
+  jet:{hp:70,resistance:.05,reward:18},drone:{hp:38,resistance:.03,reward:11},walker:{hp:340,resistance:.28,reward:55},bunker:{hp:430,resistance:.34,reward:62},sentinel:{hp:BOSS_HP_BASE,resistance:1.1,reward:500}};
 for(const type in TYPES){const unit=ASSETS.enemyUnit(type);if(!unit)throw new Error('单位 '+type+' 未在 assets/asset-index.js 登记');TYPES[type].label=unit.label;TYPES[type].assetId=ASSETS.dir.enemy(unit.faction,type);TYPES[type].renderer=unit.renderer;}
 const alive=e=>e.state==='alive';const activeBuildings=()=>buildings.filter(b=>!b.dead);
 function fmt(n){if(n>=1e9)return(n/1e9).toFixed(2)+'B';if(n>=1e6)return(n/1e6).toFixed(2)+'M';if(n>=10000)return(n/1000).toFixed(1)+'K';return Math.floor(n).toLocaleString('en-US');}
@@ -292,10 +370,12 @@ function banner(s,sub='GNN / SPECIAL COVERAGE'){ $('eventBanner').innerHTML=s+`<
 function burst(x,y,n=24,palette=['#fff3b7','#ffbb4d','#fa622c','#9a3940'],force=180){for(let i=0;i<n;i++){let a=rand(0,Math.PI*2),v=rand(20,force);particles.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-70,life:rand(.3,1.3),size:rand(3,12),color:palette[Math.floor(rand(0,palette.length))],gravity:310});}}
 function smoke(x,y,size=17){particles.push({x,y,vx:rand(-24,-6),vy:rand(-55,-20),life:rand(1.3,2.8),size:rand(size*.6,size*1.5),color:['#182234','#263045','#343a4c'][Math.floor(rand(0,3))],gravity:-9,smoke:true});}
 function explosion(x,y,big=1){burst(x,y,Math.round(35*big),undefined,230*big);rings.push({x,y,r:5,life:.38,color:'#ffd07b',type:'blast'});shake=Math.max(shake,6*big);slow=Math.max(slow,.07*big);sound('boom');}
-function enemy(type,x,y){let spec=TYPES[type],hp=spec.hp*P.Ke(data.district)*(currentStage().key==='village'?.6:1);return {type,x,y:y??G-17,baseY:y??G-17,hp,max:hp,cd:rand(1,4),hit:0,phase:rand(0,7),state:'alive',vx:0,vy:0,rotation:0,spin:0,age:0,hitIds:new Set()};}
+/* 关底血量走 bossMaxHp()（按目标击杀时长反解，已含区域缩放），**不再**乘 P.Ke ——
+ * 那会二次缩放区域：power()/atomic() 里已经含 districtScale 了。 */
+function enemy(type,x,y){let spec=TYPES[type],hp=type==='sentinel'?bossMaxHp():spec.hp*P.Ke(data.district)*(currentStage().key==='village'?.6:1);return {type,x,y:y??G-17,baseY:y??G-17,hp,max:hp,cd:rand(1,4),hit:0,phase:rand(0,7),state:'alive',vx:0,vy:0,rotation:0,spin:0,age:0,hitIds:new Set()};}
 function cameraScale(){return Growth.cameraScale(data.level,data.talents,data.morph,P.EPOCHS);}
 function cameraTarget(){return p.x-(420+140*clamp((bodyScale()-.333)/.787,0,1));}
-function worldSnapshot(){return {district:data.district,stage:currentStage().key,x:p.x,nextDistrict:null,bossChallengeStarted,nodeArmed,mapStartCleared,mapStartKills,worldChunk,buildings:buildings.filter(b=>b.x>p.x-2200).map(b=>({id:b.id,hp:b.hp,max:b.max,dead:b.dead})),enemies:enemies.filter(e=>bossEntity(e)||e.fixed&&e.x>p.x-2200).map(e=>({id:e.id,hp:e.hp,state:e.state,...(e.type==='sentinel'?{introDone:e.introDone,introStarted:e.introStarted,introTime:e.introTime}:{} )}))};}
+function worldSnapshot(){return {district:data.district,stage:currentStage().key,x:p.x,nextDistrict:null,bossChallengeStarted,nodeArmed,mapStartCleared,mapStartKills,worldChunk,buildings:buildings.filter(b=>b.x>p.x-2200).map(b=>({id:b.id,hp:b.hp,max:b.max,dead:b.dead})),enemies:enemies.filter(e=>bossEntity(e)||e.fixed&&e.x>p.x-2200).map(e=>({id:e.id,hp:e.hp,state:e.state,...(e.type==='sentinel'?{max:e.max,introDone:e.introDone,introStarted:e.introStarted,introTime:e.introTime}:{} )}))};}
 function save(){if(panelMode)return;try{SAVEIO.setItem(SAVE,economy.serialize(Date.now(),worldSnapshot()));if(browserPanel&&!browserPanel.closed)browserPanel.__growth?.sync(JSON.stringify(data));storageOK=true;$('saveState').innerHTML='<i></i> 进化进度已保存';}catch{storageOK=false;$('saveState').textContent='当前窗口运行 · 无法写入存档';}}
 function generateWorld(restore){seed=1701+data.district*983;buildings=[];enemies=[];bullets=[];fires=[];wrecks=[];particles=[];rings=[];beam=null;
 bossChallengeStarted=restore?.district===data.district&&restore.bossChallengeStarted===true;nodeArmed=restore?.district===data.district&&restore.nodeArmed===true;
@@ -306,11 +386,18 @@ let tier=stage.key==='village'?1:stage.key==='suburb'?Math.min(3,data.district):
 {let e=enemy('sentinel',LENGTH-NODE_GUARD,G-180);e.fixed=true;e.id='boss-sentinel';e.gate=true;e.introDone=false;e.introStarted=false;e.introTime=0;e.cd=2;enemies.push(e);}
 worldChunk=1;const savedChunks=restore?.district===data.district?Math.floor(Number(restore.worldChunk)||1):1;const count=Math.max(1,Math.min(savedChunks,1000000));for(let i=Math.max(1,count-2);i<count;i++){worldChunk=i;appendWorldChunk();}
 p.x=420;p.action={name:'walk',t:0};p.cooldowns={beam:18,stomp:7,tail:10,roar:19};p.step=0;p.angle=.12;
-if(restore&&restore.district===data.district){p.x=clamp(Number(restore.x)||420,420,LENGTH+Math.max(0,worldChunk-2)*CHUNK_SPAN+CHUNK_SPAN);let states=new Map((Array.isArray(restore.buildings)?restore.buildings:[]).map(b=>[b.id,b]));for(let b of buildings){let s=states.get(b.id);if(s){let oldMax=Number(s.max)>0?Number(s.max):(b.layer===1?230:b.layer===0?120:85)*(1+Math.max(0,data.district-1)*.12);b.hp=b.max*clamp((Number(s.hp)||0)/oldMax,0,1);b.dead=s.dead===true||b.hp<=0;b.collapse=b.dead?3:0;}}let es=new Map((Array.isArray(restore.enemies)?restore.enemies:[]).map(e=>[e.id,e]));for(let e of enemies){let s=es.get(e.id);if(s){e.hp=clamp(Number(s.hp)||0,0,e.max);if(e.type==='sentinel'){e.introDone=s.introDone===true;e.introStarted=s.introStarted===true;e.introTime=clamp(Number(s.introTime)||0,0,window.SentinelBoss.INTRO.duration);}if(s.state!=='alive'||e.hp<=0)e.state='gone';}}}
+if(restore&&restore.district===data.district){p.x=clamp(Number(restore.x)||420,420,LENGTH+Math.max(0,worldChunk-2)*CHUNK_SPAN+CHUNK_SPAN);let states=new Map((Array.isArray(restore.buildings)?restore.buildings:[]).map(b=>[b.id,b]));for(let b of buildings){let s=states.get(b.id);if(s){let oldMax=Number(s.max)>0?Number(s.max):(b.layer===1?230:b.layer===0?120:85)*(1+Math.max(0,data.district-1)*.12);b.hp=b.max*clamp((Number(s.hp)||0)/oldMax,0,1);b.dead=s.dead===true||b.hp<=0;b.collapse=b.dead?3:0;}}let es=new Map((Array.isArray(restore.enemies)?restore.enemies:[]).map(e=>[e.id,e]));for(let e of enemies){let s=es.get(e.id);if(s){if(e.type==='sentinel'){
+      /* Boss 的血量上限跟着巨兽输出走（bossMaxHp），重启后会重算 —— 所以按**比例**
+       * 恢复，不是按绝对值，否则读一次档血条就跳一下。旧档快照里没有 max（改动前
+       * 只存 hp），用改动前的公式把绝对血量换算成比例。与建筑那一段同一个套路。 */
+      const oldMax=Number(s.max)>0?Number(s.max):bossLegacyMax(data.district,currentStage().key==='village');
+      e.hp=e.max*clamp((Number(s.hp)||0)/oldMax,0,1);
+      e.introDone=s.introDone===true;e.introStarted=s.introStarted===true;e.introTime=clamp(Number(s.introTime)||0,0,window.SentinelBoss.INTRO.duration);
+    } else e.hp=clamp(Number(s.hp)||0,0,e.max);if(s.state!=='alive'||e.hp<=0)e.state='gone';}}}
 if(worldChunk>1){buildings=buildings.filter(b=>b.x>p.x-2200);enemies=enemies.filter(e=>bossEntity(e)||e.x>p.x-2200||alive(e)&&Math.abs(e.x-p.x)<1350);}syncBossPost();camera=cameraTarget();$('location').textContent=cityTitle();refreshTicker();commitTicker();tickerOffset=0;spawnTimer=7;}
 function grant(n,xp,x,y){n*=economy.rewardMult();economy.gain(n,xp);if(x!==undefined)floaters.push({x,y,text:'+'+Math.round(n),life:1.2,color:'#a0e9df'});}
 function damageBuilding(b,n,source='claw'){if(b.dead)return;b.hp-=n;b.hit=.13;if(Math.random()<.17)burst(b.x+rand(0,b.w),b.ground-b.h*.6,3,['#708299','#485568','#c5b9a3'],90);if(b.hp<=0){b.dead=true;b.hp=0;b.collapse=.001;data.cleared++;grant(30+b.h*.11,P.xpPerBuilding(data.district,b.layer),b.x+b.w/2,b.ground-b.h);fires.push({x:b.x+b.w*.6,y:b.ground-12,size:35+b.w*.12,age:0,jitter:rnd()*.2-.1});explosion(b.x+b.w/2,b.ground-b.h*.48,b.layer===1?1.6:.8);for(let j=0;j<7;j++)smoke(b.x+rand(0,b.w),b.ground-b.h*.4,30);if(b.layer===1)broadcast('建筑群接连倒塌，巨兽正突破街区封锁','现场记者：承重结构已断裂，坍塌引发连锁尘浪');}}
-function defeat(e,source='beam'){if(!alive(e))return;e.hp=0;e.age=0;e.hit=0;data.kills++;grant(TYPES[e.type].reward,P.xpPerEnemy(data.district),e.x,e.y-50);if(e.type==='sentinel'){e.state='falling';e.age=0;shake=12;broadcast('巨型守卫倒下，区域即将被摧毁','银曜巨人核心熄灭 · 正在打开下一地区通道');return;}let flying=/heli|gunship/.test(e.type);if(source==='claw'||source==='tail'){e.state='flying';e.vx=rand(230,370)*(source==='tail'?-1:1);e.vy=-rand(250,390);e.spin=(source==='tail'?-1:1)*rand(4,8);burst(e.x,e.y,14,undefined,130);broadcast(flying?'直升机被巨兽击飞，正在失控翻滚':'装甲车辆被拍向半空，残骸高速翻滚','现场画面：目标将在落地时发生二次爆炸');}else if(flying){e.state='crashing';e.vx=rand(-100,160);e.vy=rand(0,50);e.spin=rand(1.8,3.5);explosion(e.x,e.y,.65);broadcast('武装直升机失控，拖着浓烟坠向街区','地面机位追踪中 · 旋翼损毁，机身持续旋转');}else{e.state='exploding';e.rotation=rand(-.12,.12);e.age=0;explosion(e.x,e.y,1.1);fires.push({x:e.x,y:G-12,size:33,age:0,jitter:rnd()*.2-.1});}}
+function defeat(e,source='beam'){if(!alive(e))return;e.hp=0;e.age=0;e.hit=0;data.kills++;grant(TYPES[e.type].reward,P.xpPerEnemy(data.district),e.x,e.y-50);if(e.type==='sentinel'){e.state='falling';e.age=0;shake=12;beginSceneSwitch();broadcast('巨型守卫倒下，区域即将被摧毁','银曜巨人核心熄灭 · 正在打开下一地区通道');return;}let flying=/heli|gunship/.test(e.type);if(source==='claw'||source==='tail'){e.state='flying';e.vx=rand(230,370)*(source==='tail'?-1:1);e.vy=-rand(250,390);e.spin=(source==='tail'?-1:1)*rand(4,8);burst(e.x,e.y,14,undefined,130);broadcast(flying?'直升机被巨兽击飞，正在失控翻滚':'装甲车辆被拍向半空，残骸高速翻滚','现场画面：目标将在落地时发生二次爆炸');}else if(flying){e.state='crashing';e.vx=rand(-100,160);e.vy=rand(0,50);e.spin=rand(1.8,3.5);explosion(e.x,e.y,.65);broadcast('武装直升机失控，拖着浓烟坠向街区','现场镜头追踪中 · 旋翼损毁，机身持续旋转');}else{e.state='exploding';e.rotation=rand(-.12,.12);e.age=0;explosion(e.x,e.y,1.1);fires.push({x:e.x,y:G-12,size:33,age:0,jitter:rnd()*.2-.1});}}
 function damageEnemy(e,n,source){if(!alive(e)||e.type==='sentinel'&&e.introDone===false)return;e.hp-=n;e.hit=.11;if(e.hp<=0)defeat(e,source);}
 function doClaw(){let c=SK.claw;burst(c.x,c.y,16,['#d8fbff','#6bd8eb','#ffdf9a'],170);sound('hit');shake=7;slow=.12;let power=economy.power();for(let b of buildings)if(!b.dead&&b.x-c.x<70&&b.x+b.w-c.x>-45)damageBuilding(b,power*(b.layer===2?1.3:1),'claw');for(let e of enemies)if(alive(e)&&Math.abs(e.x-c.x)<135)damageEnemy(e,power*1.4,'claw');if(economy.has('impact'))for(let b of buildings)if(!b.dead&&b.x-c.x<260&&b.x-c.x>70)damageBuilding(b,power*.4,'claw');}
 function doStomp(){let power=economy.power(),range=(economy.has('seismic')?576:360)*(1+Growth.spineBonus(data.level,data.morph));explosion(p.x+35,G,1.7);rings.push({x:p.x+35,y:G,r:25,life:1,color:'#a5dfff',type:'stomp'});burst(p.x+35,G,60,['#87a8c1','#c3ecff','#55617c'],350);for(let b of buildings)if(!b.dead&&Math.abs(b.x-p.x)<range)damageBuilding(b,power*(economy.has('seismic')?3.4:1.7),'stomp');for(let e of enemies)if(alive(e)&&!(/heli|gunship/.test(e.type))&&Math.abs(e.x-p.x)<range)damageEnemy(e,power*2.8,'stomp');broadcast('地面发生强烈震动，多辆战车瞬间爆燃','巨兽重踏产生冲击波，近处建筑与道路同时受损');/* 技能不拉突发条 */}
@@ -337,7 +424,7 @@ let damage=(fire?economy.atomic()*1.25+economy.power()*0.4:economy.atomic())*dt*
 function shoot(e){let hb=KaijuRig.hitbox(BS,p.x,G),hw=hb.x1-hb.x0,hh=hb.y1-hb.y0;
 let tx=p.x+rand(-0.05,0.42)*hw,ty=hb.y0+rand(0.30,0.78)*hh,dx=tx-e.x,dy=ty-e.y,d=Math.hypot(dx,dy)||1,speed=e.type==='aegis'?440:240;bullets.push({x:e.x,y:e.y-13,vx:dx/d*speed,vy:dy/d*speed,life:6,type:e.type==='rocket'||e.type==='mech'?'rocket':e.type==='aegis'?'electric':'shell',trail:[]});sound('shot');}
 function crash(e){if(e.state==='gone'||e.state==='exploding')return;e.state='exploding';e.age=0;e.y=G-10;crashCount++;explosion(e.x,G-22,/heli|gunship/.test(e.type)?1.7:1.2);fires.push({x:e.x,y:G-8,size:38,age:0});wrecks.push({x:e.x,y:G-6,angle:rand(-.3,.3),age:0,type:e.type});for(let b of buildings)if(!b.dead&&Math.abs(b.x-e.x)<150)damageBuilding(b,economy.power()*(economy.has('throw')?1.3:.35),'wreck');for(let other of enemies)if(other!==e&&alive(other)&&Math.abs(other.x-e.x)<(economy.has('throw')?200:100))damageEnemy(other,economy.power()*(economy.has('throw')?2:.45),'wreck');broadcast('残骸撞击地面，引发剧烈二次爆炸','翻滚的装甲与燃烧机体波及邻近建筑和军队');}
-function updateEnemies(dt){for(let e of enemies){e.age+=dt;if(alive(e)){if(Math.abs(e.x-p.x)>1350)continue;e.hit=Math.max(0,e.hit-dt);e.phase+=dt;if(e.type==='sentinel'){updateSentinel(e,dt);continue;}if(/heli|gunship/.test(e.type)){e.y=e.baseY+Math.sin(e.phase*1.6)*20;if(Math.abs(e.x-p.x)>600)e.x-=Math.sign(e.x-p.x)*dt*27;}e.cd-=dt;if(e.cd<=0){e.cd=e.type==='rocket'?4:e.type==='aegis'?2.2:3;shoot(e);if(e.type==='mech'||e.type==='gunship'){shoot({...e,y:e.y+20});}}}else if(e.state==='falling'){if(e.age>=2.4){e.state='gone';explosion(e.x,G-20,2);shake=10;if(e.type==='sentinel'&&bossChallengeStarted)completeBossChallenge();}}else if(e.state==='flying'||e.state==='crashing'){e.x+=e.vx*dt;e.y+=e.vy*dt;e.vy+=dt*(e.state==='crashing'?125:290);e.rotation+=e.spin*dt;if(Math.random()<dt*28)smoke(e.x,e.y-8,22);if(Math.random()<dt*12)burst(e.x,e.y,2,undefined,65);if(e.y>=G-13||e.age>6)crash(e);}else if(e.state==='exploding'&&e.age>.45)e.state='gone';}
+function updateEnemies(dt){for(let e of enemies){e.age+=dt;if(alive(e)){if(Math.abs(e.x-p.x)>1350)continue;e.hit=Math.max(0,e.hit-dt);e.phase+=dt;if(e.type==='sentinel'){updateSentinel(e,dt);continue;}if(/heli|gunship/.test(e.type)){e.y=e.baseY+Math.sin(e.phase*1.6)*20;if(Math.abs(e.x-p.x)>600)e.x-=Math.sign(e.x-p.x)*dt*27;}e.cd-=dt;if(e.cd<=0){e.cd=e.type==='rocket'?4:e.type==='aegis'?2.2:3;shoot(e);if(e.type==='mech'||e.type==='gunship'){shoot({...e,y:e.y+20});}}}else if(e.state==='falling'){if(e.age>=BOSS_FALL){e.state='gone';explosion(e.x,G-20,2);shake=10;if(e.type==='sentinel'&&bossChallengeStarted)completeBossChallenge();}}else if(e.state==='flying'||e.state==='crashing'){e.x+=e.vx*dt;e.y+=e.vy*dt;e.vy+=dt*(e.state==='crashing'?125:290);e.rotation+=e.spin*dt;if(Math.random()<dt*28)smoke(e.x,e.y-8,22);if(Math.random()<dt*12)burst(e.x,e.y,2,undefined,65);if(e.y>=G-13||e.age>6)crash(e);}else if(e.state==='exploding'&&e.age>.45)e.state='gone';}
 /* 命中判定与渲染同源：受击盒随体型缩放。
  * 老实现是 |Δx|<75 且 y∈(G-350, G) 的死矩形，按满体型（约 401px 高）定死的 ——
  * 1 级体型 0.34 倍时怪兽只有 136px 高，子弹既可能从头顶飞过被判"打中"，
@@ -605,9 +692,18 @@ function drawWeather(){
   ctx.globalAlpha=1;
 }
 function drawCampaignRoute(){
-  const r=currentRoute(),ready=bossChallengeAvailable(),x0=262,y=44,w=500,step=w/4,gap=8,inner=step-gap*2,exitLen=40;
-  ctx.save();rect(x0-20,8,800,70,'#071225e8');
-  text(r.chapter.title+' / '+r.street.name+' · 第'+r.round+'轮',x0-8,25,14,r.street.color);
+  /* 版面尺寸 2026-09-20 按反馈整体放大（"进度条太小了"）。
+   *
+   * 预算来自实测，不是目测：.workbuddy/_route-metric.cjs 量出画面上那一排 DOM
+   * 浮层在 1280×720 逻辑坐标里的真实占位 —— .camera-top 从 y=158 起、.ticker
+   * 从 y=662 起、.action-caption 在左下 573~655。所以这条推图条可以用到 y≈150
+   * 而不撞它们；改大这里任何数字之前先重跑那个探针。
+   *
+   * 现在的版面：底板 y 6~138，标题 22px 基线 40，轨道 10px 压在中线 y=78 上，
+   * 节点 30px 方块（闸门开时套 40px 红框），右栏三行 18px。 */
+  const r=currentRoute(),ready=bossChallengeAvailable(),x0=262,y=78,w=560,step=w/4,gap=24,inner=step-gap*2,exitLen=56;
+  ctx.save();rect(x0-26,6,1010,132,'#071225f0');
+  text(r.chapter.title+' / '+r.street.name+' · 第'+r.round+'轮',x0-10,40,22,r.street.color);
   /* 推图轨道与 5 个节点**画在同一条线**上（y=44），节点方块压在轨道上。
    *
    * 老实现把进度条单独画在 y=65：既不和节点同一条线，填充宽度 (w+16)*progress
@@ -618,27 +714,53 @@ function drawCampaignRoute(){
    * 现在的口径：走过的段绿、当前段按本区推进度填街道色、未到的段暗。
    * 本区推进度就是突破闸门的进度（12 栋建筑 / 8 个敌军，见 mapProgress()）。
    * 本章最后一个区（index 4）没有"下一段"，进度改填右侧那段「本章出口」。 */
-  rect(x0,y-1,w,3,'#30445b');
-  if(r.index===4)rect(x0+w,y-1,exitLen,3,'#30445b');
-  for(let i=0;i<r.index&&i<4;i++)rect(x0+i*step+gap,y-1,inner,3,'#70e7b0');
+  rect(x0,y-5,w,10,'#30445b');
+  if(r.index===4)rect(x0+w,y-5,exitLen,10,'#30445b');
+  for(let i=0;i<r.index&&i<4;i++)rect(x0+i*step+gap,y-5,inner,10,'#70e7b0');
   const fill=(r.index<4?inner:exitLen)*r.progress;
-  if(fill>0)rect(x0+r.index*step+gap,y-1,fill,3,r.street.color);
+  if(fill>0)rect(x0+r.index*step+gap,y-5,fill,10,r.street.color);
   for(let i=0;i<5;i++){const x=x0+i*step,done=i<r.index,current=i===r.index;
     /* 闸门已开 = 可以进入下一城区，当前节点套一圈红框 —— 与按钮的红是同一个含义。 */
-    if(current&&ready)rect(x-10,y-10,20,20,'#ff7780');
-    rect(x-7,y-7,14,14,done?'#70e7b0':current?r.street.color:'#4b6075');
-    text(String(r.nodes[i].district),x+14,y+4,10,current?'#fff3c4':'#94a9bd');}
+    if(current&&ready)rect(x-20,y-20,40,40,'#ff7780');
+    rect(x-15,y-15,30,30,done?'#70e7b0':current?r.street.color:'#4b6075');
+    text(String(r.nodes[i].district),x+22,y+6,16,current?'#fff3c4':'#94a9bd');}
   /* 右栏说清"下一个区落在哪一章"。老实现写的是 '下一城区 · '+章名（"下一城区 · 大阪"），
    * 大阪是城市不是城区，而"下一章 · 东京"这个真正要玩家等的信号反而没出现。
    * 红只留给**真的跨章**那一下 —— 同章内变红会把"可以切场景"这个信号稀释掉，
    * 开门（可推进）由当前节点的红圈和下面那行「已突破」负责。 */
   const cross=r.nextChapter.key!==r.chapter.key;
-  text((cross?'下一章 · ':'本章 · ')+r.nextChapter.name,x0+w+48,27,12,(cross&&ready)?'#ff7780':'#b6cadc');
-  text('下一城区 · '+r.nextStreet.name,x0+w+48,45,12,r.nextStreet.color);
-  text(ready?'已突破 · 遥控器进入下一城区':'本区推进 '+Math.floor(r.progress*100)+'%',x0+w+48,69,12,ready?'#ff9aa2':'#b6cadc');ctx.restore();
+  text((cross?'下一章 · ':'本章 · ')+r.nextChapter.name,x0+w+56,42,18,(cross&&ready)?'#ff7780':'#b6cadc');
+  text('下一城区 · '+r.nextStreet.name,x0+w+56,78,18,r.nextStreet.color);
+  text(ready?'已突破 · 遥控器进入下一城区':'本区推进 '+Math.floor(r.progress*100)+'%',x0+w+56,114,18,ready?'#ff9aa2':'#b6cadc');ctx.restore();
+}
+/* 转台雪花。噪点是"第几帧 + 第几行"哈希出来的，不用 Math.random ——
+ * 画面噪声不该消耗熵源，也不该随帧率抖成另一张图（这是外观表现，
+ * 与项目里"外观只用 hashSeed+mulberry32"那条纪律同一个理由）。
+ * 那道亮带压在世界替换的那一拍（t=rise）上，遮住"换的瞬间"本身。 */
+function noiseGrain(a,b){const n=Math.sin(a*12.9898+b*78.233)*43758.5453;return n-Math.floor(n);}
+function drawSceneSwitch(g){
+  if(!sceneSwitch)return;
+  const alpha=sceneSwitchAlpha(sceneSwitch.t);if(alpha<=0)return;
+  const frame=Math.floor(sceneSwitch.t*30);
+  g.setTransform(1,0,0,1,0,0);g.save();g.globalAlpha=alpha;
+  g.fillStyle='#05070c';g.fillRect(0,0,W,H);
+  for(let yy=0;yy<H;yy+=4){const n=noiseGrain(frame,yy),v=30+Math.floor(n*205);
+    g.fillStyle='rgb('+v+','+Math.min(255,v+Math.floor(noiseGrain(frame,yy+1)*24))+','+Math.min(255,v+38)+')';
+    g.fillRect(0,yy,W,4);}
+  for(let i=0;i<6;i++){const ly=Math.floor(noiseGrain(frame*3+i,i*7)*H);
+    g.fillStyle='#e6f3ff';g.fillRect(0,ly,W,2+Math.floor(noiseGrain(i,frame)*5));}
+  const sweep=sceneSwitch.t-SCENE_SWITCH.rise;
+  if(sweep>=-.12&&sweep<=.3){const ly=clamp((sweep+.12)/.42,0,1)*H;g.fillStyle='#ffffffdd';g.fillRect(0,ly-9,W,26);}
+  g.fillStyle='#d8ecff';g.font='26px Pixel, monospace';g.textAlign='center';
+  g.fillText('信号切换中 · GNN',W/2,H/2-6);
+  g.globalAlpha=alpha*.7;g.font='16px Pixel, monospace';
+  g.fillText('正在接收下一区域信号',W/2,H/2+24);
+  g.restore();
 }
 function render(){ctx.setTransform(.5,0,0,.5,0,0);ctx.clearRect(0,0,W,H);drawSky();ctx.save();let center=p.x-camera,s=sceneZoom*zoom*.8;ctx.translate(center,H*.72);ctx.scale(s,s);ctx.translate(-center,-G);if(shake>0)ctx.translate(Math.sin(time*90)*shake,Math.cos(time*73)*shake*.45);drawSky();drawGround();drawBuildings(0);drawBuildings(1);drawWrecks();for(let e of enemies)if(alive(e))drawEnemy(e);drawGodzilla(SK,BS);drawBeam();for(let b of bullets){let t=b.trail.map(v=>[v[0]-camera,v[1]]);if(t.length>1)line(t,b.type==='electric'?'#84dfff':'#ffa155',3);rect(b.x-camera-5,b.y-3,10,6,b.type==='electric'?'#bfffff':'#fff0a2');}for(let e of enemies)if(!alive(e))drawEnemy(e);for(let f of fires)if(Math.abs(f.x-camera-W/2)<W){const fireScale=fxScale(f.jitter);fire(f.x-camera,f.y,f.size*3.2*fireScale*Math.min(1,(24-f.age)/8));}drawParticles();drawBuildings(2);drawForeground();drawWeather();ctx.restore();drawCampaignRoute();const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'#01091b65');shade.addColorStop(.2,'#010a1900');shade.addColorStop(.75,'#010a1900');shade.addColorStop(1,'#02091b88');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);out.drawImage(buffer,0,0,W,H);
-if(channel==='live'){monitor.drawImage(buffer,clamp((p.x-camera)/2-15,0,420),130,210,130,0,0,240,130);monitor.fillStyle='#153d5633';monitor.fillRect(0,0,240,130);monitor.fillStyle='#f0505d';monitor.fillRect(8,8,4,4);}if(channel!=='live')drawChannel();}
+/* 换场雪花盖在最上面 —— 它必须压住推图条 / 暗角 / 频道画面，否则"遮满屏幕"
+ * 这句话只在部分图层上成立。哪个画布在显示就画在哪个上（转台与直播两态都覆盖）。 */
+if(channel!=='live')drawChannel();drawSceneSwitch(out);if(channel!=='live')drawSceneSwitch(channelCtx);}
 const ACTIONS={walk:['持续跟踪','目标正在向城市深处移动'],claw:['现场：巨爪横扫','挥爪、击飞与建筑结构破坏'],beam:['高能预警：原子吐息','口部射线正在锁定前方目标'],stomp:['地震警报：巨兽重踏','地面冲击波席卷近处防线'],roar:['声压异常：震慑咆哮','空中编队失去稳定，炮弹被震散'],tail:['现场：尾部横扫','后方与前景建筑受到大范围撞击']};
 const PROGRAMS={
   news:{label:'GNN 新闻台',short:'CH 02',title:'GNN 24H 新闻 · 东京特别报道',sub:'主播 林岚 / 现场记者持续连线',accent:'#ff5b6b'},
@@ -970,10 +1092,15 @@ updateAI(dt);updateBeam(dt);updateEnemies(dt);armNodeGate();camera+=(Math.max(0,
 for(let b of buildings){b.hit=Math.max(0,b.hit-dt);if(b.dead&&b.collapse<3){b.collapse+=dt;if(Math.random()<dt*20)smoke(b.x+rand(0,b.w),b.ground-Math.max(0,b.h*(1-b.collapse*.6)),25);}else if(!b.dead&&b.hp<b.max*.65&&Math.random()<dt*7)smoke(b.x+b.w*.66,b.ground-b.h*.6,18);}
 for(let f of fires){f.age+=dt;const smokeRate=data.level<15?5.5:11;if(Math.random()<dt*smokeRate){smoke(f.x+rand(-f.size/2,f.size/2),f.y-20,20*fxScale(f.jitter));}}fires=fires.filter(f=>f.age<24&&Math.abs(f.x-p.x)<1900).slice(-60);for(let w of wrecks)w.age+=dt;wrecks=wrecks.filter(w=>w.age<50&&Math.abs(w.x-p.x)<1900).slice(-40);
 for(let a of particles){a.life-=dt;a.x+=a.vx*dt;a.y+=a.vy*dt;a.vy+=a.gravity*dt;if(a.smoke)a.size+=dt*11;else if(a.y>G+8){a.y=G+8;a.vy*=-.22;a.vx*=.7;}}particles=particles.filter(a=>a.life>0&&Math.abs(a.x-p.x)<1800).slice(-700);for(let r of rings){r.life-=dt;r.r+=dt*(r.type==='blast'?170:470);}rings=rings.filter(r=>r.life>0);for(let f of floaters){f.life-=dt;f.y-=dt*27;}floaters=floaters.filter(f=>f.life>0);if(p.moving&&Math.random()<dt*10)burst(p.x+25,G,2,['#629fbc','#b7dcf3'],80);
+/* 换场雪花的时间轴。**世界替换不在这里** —— 它按 BOSS_FALL 那一拍由
+ * completeBossChallenge 触发（见 updateEnemies），本段只负责爬升 / 维持 / 散开。
+ * 这样"替换发生在雪花遮满的那一帧"由两个常量的大小关系保证，
+ * 而不是靠这里的代码顺序 —— 顺序会被后来的人无意改掉。 */
+if(sceneSwitch){sceneSwitch.t+=dt;if(sceneSwitchDone(sceneSwitch.t))endSceneSwitch();}
 saveTimer+=wallDt;if(saveTimer>=5){saveTimer=0;save();}uiTimer+=wallDt;if(uiTimer>=.2){uiTimer=0;hud();}}
 buildUI();
 if(panelMode){openPanel('assign');hud();}
-else{generateWorld(data.world);broadcast('巨兽观测恢复 · '+chapterLocation(),'累计行程 '+Math.floor(data.meters)+' m · 地面机位持续跟踪',true);catchUp(Date.now());save();hud();}
+else{generateWorld(data.world);broadcast('巨兽观测恢复 · '+chapterLocation(),'累计行程 '+Math.floor(data.meters)+' m · 现场镜头持续跟踪',true);catchUp(Date.now());save();hud();}
 if(!panelMode){
   document.addEventListener('pointerdown',()=>{if(!muted)audioInit();},{once:true});
   document.fonts?.ready.then(()=>{for(const b of buildings)b.texture=makeBuilding(b.x,b.w,b.h,b.index).texture;});

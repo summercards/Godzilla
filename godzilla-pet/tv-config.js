@@ -185,14 +185,14 @@ const TV_STARTUP_CSS = `
 `;
 
 /* 面板窗口专属注入。面板是"另一个 tv 实例"，但它不是用来直播的 ——
- * 用户要的是一块干净的菜单：直播包装（台标条、机位小窗、字幕组、
+ * 用户要的是一块干净的菜单：直播包装（台标条、字幕组、
  * 滚动新闻条、页脚）全部藏掉，只留观测面板本身。
  *
  * 只在面板窗口注入，电视画面一个像素都不受影响：这里藏掉的每一个元素
  * 在电视窗里都必须原样保留。 */
 const PANEL_ONLY_CSS = `
   /* 直播包装全部藏掉 */
-  header, footer, #game, .scanlines, .camera-top, .inset,
+  header, footer, #game, .scanlines, .camera-top,
   .action-caption, .event-banner, .lower-third, .ticker,
   #offline, #notice { display: none !important; }
   /* 电视左侧那排实体按钮（功能菜单 + 转台）只在直播电视窗口里有意义，

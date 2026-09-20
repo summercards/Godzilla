@@ -160,7 +160,7 @@ localStorage.setItem('gnn-kaiju-idle-v3', economy.serialize(Date.now(), worldSna
 ## 迷你电视
 
 窗口里播的就是 `tv/` 那份游戏：像素新宿夜景、GNN 直播包装、
-滚动新闻条、地面机位小窗，连它自带的进化系统、离线收益、自动战斗全都照旧。
+滚动新闻条、转台式雪花换场，连它自带的进化系统、离线收益、自动战斗全都照旧。
 
 ![三档尺寸](docs/mini-tv.png)
 

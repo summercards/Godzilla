@@ -137,38 +137,46 @@ test('路线条与节点同线，填充跟着当前节点走，章末出口在�
     const env = { currentRoute: () => r, bossChallengeAvailable: () => gate, ctx: { save() {}, restore() {} },
       rect: (...a) => rects.push(a), text: (...a) => texts.push(a) };
     vm.runInNewContext(functionSource('drawCampaignRoute', 'render') + ';drawCampaignRoute();', env);
-    // 轨道各段统一高 3（改前那条是 4），节点方块 14×14，开闸红圈 20×20
-    return { r, texts, rects, nodes: rects.filter(a => a[2] === 14 && a[3] === 14), track: rects.filter(a => a[3] <= 4) };
+    /* 版面 2026-09-20 按反馈整体放大（"进度条太小了，变粗变大，字体也变大"）：
+     * 轨道高 3→10、节点方块 14→30、开闸红圈 20→40、标题字号→22、右栏→18。
+     * 下面每条断言都用**新尺寸**取 rect，缩回去就会红。 */
+    return { r, texts, rects, nodes: rects.filter(a => a[2] === 30 && a[3] === 30), track: rects.filter(a => a[3] === 10) };
   };
 
   const mid = draw(2, .5, null);           // 第 2 区（index 1），本区推进 50%
   assert.equal(mid.nodes.length, 5);
   assert.equal(mid.r.index, 1);
 
+  /* 放大的尺寸单独立一条钉住 —— 这是这次反馈的重点，别被谁"顺手缩回去"。 */
+  assert.equal(mid.nodes[0][2], 30, '节点方块又被缩回去了（30×30 是放大后的尺寸）');
+  assert.ok(mid.track.every(a => a[3] === 10), '轨道高度不再是 10px');
+  assert.ok(mid.texts.some(a => a[3] === 22), '标题字号不再是 22px');
+  assert.ok(mid.texts.some(a => a[3] === 18), '右栏字号不再是 18px');
+
   // ① 同一条线：轨道必须落在节点方块的高度范围内
   const top = mid.nodes[0][1], bottom = top + mid.nodes[0][3];
   for (const a of mid.track) assert.ok(a[1] >= top && a[1] + a[3] <= bottom,
     `轨道 y=${a[1]}..${a[1] + a[3]} 跑到节点行（${top}..${bottom}）外面去了`);
 
-  // ② 填充起点跟着当前节点，不是整个轨道的最左边
-  const fill = mid.track.find(a => a[0] === 262 + 1 * 125 + 8 && a[4] === mid.r.street.color);
+  // ② 填充起点跟着当前节点，不是整个轨道的最左边（x0=262、step=140、gap=24）
+  const fill = mid.track.find(a => a[0] === 262 + 1 * 140 + 24 && a[4] === mid.r.street.color);
   assert.ok(fill, '本区推进的填充没有从当前节点（第 2 个）之后开始');
-  assert.ok(Math.abs(fill[2] - 109 * .5) < 1e-9, '填充长度不是 step−2×gap 的 50%');
+  assert.ok(Math.abs(fill[2] - 92 * .5) < 1e-9, '填充长度不是 step−2×gap 的 50%');
 
   // ③ 正在推进的那一段不是暗的，未到的段才是
   assert.equal(mid.track.filter(a => a[4] === '#70e7b0').length, mid.r.index, '只有走过的段是绿的');
 
   const last = draw(5, .5, null);          // 第 5 区（index 4），本章最后一个节点
-  assert.ok(last.track.some(a => a[0] === 762 && a[2] === 40), '最后一个区没有通往下一章的出口');
-  const exit = last.track.find(a => a[0] === 770 && a[4] === last.r.street.color);
-  assert.ok(exit && Math.abs(exit[2] - 20) < 1e-9, '最后一个区的推进度必须填在章末出口里');
+  assert.ok(last.track.some(a => a[0] === 822 && a[2] === 56), '最后一个区没有通往下一章的出口');
+  const exit = last.track.find(a => a[0] === 846 && a[4] === last.r.street.color);
+  assert.ok(exit && Math.abs(exit[2] - 28) < 1e-9, '最后一个区的推进度必须填在章末出口里');
   assert.ok(last.texts.some(a => a[0] === '下一章 · 东京'), '跨章时右栏没有点名第二章');
   assert.ok(last.texts.some(a => a[0] === '下一城区 · 浅草灯笼街'));
   assert.ok(last.texts.some(a => a[0].includes('50%')));
   assert.ok(draw(2, .3, null).texts.some(a => a[0] === '本章 · 大阪'), '章内推进不该点名别的章');
 
   // ④ 已开闸：当前节点套红圈、右栏转红；未开闸一个红圈都不许有
-  const ring = (d) => d.rects.filter(a => a[2] === 20 && a[3] === 20);
+  const ring = (d) => d.rects.filter(a => a[2] === 40 && a[3] === 40);
   const gated = draw(5, 1, { district: 6 });
   assert.equal(ring(gated).length, 1, '已开闸时当前节点要套一圈红');
   assert.equal(ring(gated)[0][4], '#ff7780');
@@ -178,7 +186,10 @@ test('路线条与节点同线，填充跟着当前节点走，章末出口在�
   assert.ok(draw(2, 1, { district: 3 }).texts.every(a => a[4] !== '#ff7780'),
     '同章内开闸不该出现跨章红');
 
-  assert.ok(mid.rects.every(a => a[1] + a[3] <= 78), '路线条不能覆盖怪兽活动区');
+  /* 放大后的底板（y 6..138）不能压到画面上的 LIVE 机位条：实测 .camera-top
+   * 从 y=158 起，中间那 20px 就是这次放大的预算上限（见 .workbuddy/_route-metric.cjs）。
+   * 想再往下长，先重跑那个探针。 */
+  assert.ok(mid.rects.every(a => a[1] + a[3] <= 158), '路线条压到 LIVE 机位条上了');
 });
 
 /* 关卡前进按钮的文案。

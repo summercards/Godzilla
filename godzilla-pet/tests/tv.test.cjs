@@ -868,3 +868,38 @@ test('突发新闻：技能释放不拉字幕条，其余事件至少隔一分�
   assert.match(game, /breakingCd=Math\.max\(0,breakingCd-dt\);/,
     '间隔没有随时间衰减，第一条突发新闻之后再也不会拉横幅');
 });
+
+/* 「地面机位 CAM 02」小窗（.inset / #monitor）2026-09-20 按反馈移除。
+ *
+ * 它是画面右上角的第二块屏幕，信息量却和主画面完全重复（同一个 buffer 的裁切），
+ * 白白抢注意力。删元素不删代码会在下一次 $() 里当场抛错，所以这条链上的每一环
+ * 都要一起钉：元素（index.html）/ 上下文与绘制（game.js）/ 样式（style.css）/
+ * 面板隐藏清单（tv-config.js）/ 两处播报文案。
+ *
+ * 变异测试：把 index.html 的 .inset 段落贴回来，或把 game.js 的 monitor.getContext
+ * 加回去，这条必须变红。 */
+test('画面：地面机位小窗（.inset / #monitor）已整条移除', () => {
+  // 剥掉注释再断言：index.html / style.css 里都特意留了"原来是什么、为什么删"的说明，
+  // 那段说明要长期保留，不该被当成违规证据（同「常驻 HUD 已移除」那条）。
+  const html = fs.readFileSync(path.join(ROOT, 'tv', 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const game = readGame();
+  const css = fs.readFileSync(path.join(ROOT, 'tv', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  // ① 元素
+  assert.ok(!html.includes('id="monitor"'), 'index.html 里又出现了 #monitor 画布');
+  assert.ok(!/class="inset"/.test(html), 'index.html 里又出现了 .inset 小窗容器');
+  assert.ok(!html.includes('CAM 02'), 'index.html 里又出现了 CAM 02 文案');
+
+  // ② 代码：只认"建上下文 / 取元素"这种形状，不全文找词。
+  //    .monster-monitor / .monitor-caption 是观测面板里的全息扫描图，与本小窗无关，
+  //    所以这里必须精确到 monitor.getContext 与 $('monitor')，不能只搜 "monitor"。
+  assert.ok(!/monitor\.getContext/.test(game), 'game.js 里又给 monitor 建了 2D 上下文');
+  assert.ok(!/\$\('monitor'\)/.test(game), "game.js 里又在取 $('monitor') —— 元素已不存在，会当场抛错");
+  assert.ok(!/地面机位/.test(game), 'game.js 播报里又出现了「地面机位」（应写成「现场镜头」）');
+
+  // ③ 样式：不许再有生效的 .inset 规则（CSS 的 inset: 属性与 box-shadow:inset 不带点，不会误伤）
+  assert.ok(!/\.inset\b/.test(css), 'style.css 里又出现了生效的 .inset 规则');
+
+  // ④ 面板隐藏清单：元素已不存在，留着就是一条匹配不到东西的空操作
+  assert.ok(!/\.inset/.test(PANEL_ONLY_CSS), 'PANEL_ONLY_CSS 里还在藏 .inset —— 该类名在 tv/ 里已不存在');
+});

@@ -68,10 +68,16 @@ button:disabled{cursor:default}h1,h2,h3,h4,p{font-weight:400;margin:0}
 .camera-top b{background:var(--red);color:#fff;padding:2px 6px;margin-right:8px;letter-spacing:1px;box-shadow:2px 2px #571d36}
 .camera-top span{letter-spacing:1px}.camera-top small{margin-left:8px;color:#cdd8e6}.camera-top i{color:#ff5b6b;font-style:normal}
 .camera-id{color:#cdd8e6}
-.inset{position:absolute;right:2%;top:15%;width:19%;border:3px solid #2f5f7a;background:#04101f;box-shadow:3px 3px 0 #04070f;z-index:4}
-.inset>div{display:flex;align-items:center;gap:5px;font-size:clamp(7px,1cqw,13px);color:#9fc3d6;padding:3px 6px;background:#0a1830}
-.inset>div i{width:7px;height:7px;border-radius:50%;background:#ff5b6b;box-shadow:0 0 6px #ff5b6b}
-.inset>div span{margin-left:auto;color:#7fb9cf}.inset>canvas{display:block;width:100%;image-rendering:pixelated}
+/* 「地面机位 CAM 02」小窗（.inset / #monitor）的规则 2026-09-20 删除 ——
+   元素已从 index.html 移除，留着就是四条匹配不到东西的空操作。 */
+
+/* 换场雪花（见 game.js 的 SCENE_SWITCH）：雪花画在画布上，而这些浮层是 DOM、
+   z-index 高于画布 —— 不让位的话，"已进入下一区"的横幅会浮在雪花上面，
+   一眼就能看出是"硬切 + 遮罩"而不是一次真正的转台。所以整个世界替换的窗口里
+   把它们整体藏掉，雪花散开后再由 banner() 把新区域的横幅摆回来。 */
+#stage.scene-switching .camera-top,#stage.scene-switching .action-caption,
+#stage.scene-switching .ticker,#stage.scene-switching .event-banner,
+#stage.scene-switching .lower-third{opacity:0}
 .action-caption{position:absolute;left:2%;bottom:7.5%;border-left:4px solid var(--red);background:#0a1830cc;padding:5px 10px;z-index:4;max-width:62%}
 .action-caption>span{display:block;font-size:clamp(10px,1.5cqw,22px);color:#fff;text-shadow:2px 2px #051028}
 .action-caption small{display:block;color:#a9c2d4;font-size:clamp(8px,.95cqw,13px);margin-top:2px}
@@ -91,8 +97,8 @@ button:disabled{cursor:default}h1,h2,h3,h4,p{font-weight:400;margin:0}
 .ticker-clip{flex:1;overflow:hidden;white-space:nowrap}.ticker-track{display:inline-block;white-space:nowrap;will-change:transform}
 .ticker-track>span{display:inline-block;padding-right:60px;font-size:clamp(9px,1.05cqw,15px);color:#cdd8e6;letter-spacing:1px}
 .ticker-time{color:#9fb6c8;padding:0 12px;font-size:clamp(8px,1cqw,13px)}
-/* 换到其它台时，节目画面是完整独立的电视信号：不叠加主直播的机位、新闻条和字幕。 */
-.broadcast.channel-active .camera-top,.broadcast.channel-active .inset,.broadcast.channel-active .action-caption,.broadcast.channel-active .event-banner,.broadcast.channel-active .lower-third,.broadcast.channel-active .ticker{display:none}
+/* 换到其它台时，节目画面是完整独立的电视信号：不叠加主直播的台标、新闻条和字幕。 */
+.broadcast.channel-active .camera-top,.broadcast.channel-active .action-caption,.broadcast.channel-active .event-banner,.broadcast.channel-active .lower-third,.broadcast.channel-active .ticker{display:none}
 .broadcast.channel-active #channel{z-index:6}.broadcast.channel-active .scanlines{z-index:7}
 
 /* ===== 观测面板：加点 / 天赋 / 进化 ===== */
@@ -199,7 +205,7 @@ html:not(.panel-view) #management{display:none!important}
 .panel-view body{display:block;min-height:100dvh}
 .panel-view .shell{width:100%;height:100dvh;max-height:none;margin:0;padding:10px;border-radius:0;box-shadow:none;display:flex;flex-direction:column}
 .panel-view .shell::after{display:none}
-.panel-view header,.panel-view footer,.panel-view .tv-sidebar,.panel-view canvas,.panel-view .scanlines,.panel-view .camera-top,.panel-view .inset,.panel-view .action-caption,.panel-view .event-banner,.panel-view .lower-third,.panel-view .ticker,.panel-view #offline,.panel-view #notice{display:none!important}
+.panel-view header,.panel-view footer,.panel-view .tv-sidebar,.panel-view canvas,.panel-view .scanlines,.panel-view .camera-top,.panel-view .action-caption,.panel-view .event-banner,.panel-view .lower-third,.panel-view .ticker,.panel-view #offline,.panel-view #notice{display:none!important}
 .panel-view .tv-body{flex:1;min-height:0}
 .panel-view #playerFrame{padding:0;border-radius:0;box-shadow:none;min-height:0}
 .panel-view #stage{height:100%;aspect-ratio:auto}
@@ -215,7 +221,7 @@ html:not(.panel-view) #management{display:none!important}
 .panel-view .evo-desc{flex-basis:100%;margin:0}
 /* 原来这里还有一段「HUD 单行，避免摄像机状态与资源条叠在一起」的规则，
  * 随常驻 HUD 一起删除。 */
-.camera-top{top:17%}.inset{top:24%}
+.camera-top{top:17%}
 
 /* 观影时副屏打开，战斗继续运行。 */
 .whiteflash{animation:whiteFlash .2s}
@@ -234,8 +240,8 @@ footer{height:38px;margin-top:8px}
 #playerFrame:fullscreen{width:100vw;height:100vh;aspect-ratio:auto;display:grid;place-items:center;background:#000;box-shadow:none;padding:0}
 #playerFrame:fullscreen .broadcast{width:min(100vw,calc(100vh*16/9));height:min(100vh,calc(100vw*9/16));aspect-ratio:16/9}
 
-@media(max-width:1050px){.pixel-button{padding:6px 9px}.tv-sidebar{width:120px}.camera-top small,.camera-id{font-size:10px}.camera-top small{margin-left:8px}.inset>div{font-size:10px;padding:4px}.inset>div span{font-size:8px}.live-bug b{font-size:20px}.headline p{font-size:10px}.management-screen{padding:2%}.obs-title{margin-bottom:10px}.obs-tools>span{display:none}.upgrade-card{padding:10px}.upgrade-card h3{font-size:16px}.upgrade-card button{padding:8px 5px;gap:3px}.skill-tree{gap:10px}.skill-node{padding:8px;gap:6px;flex-wrap:wrap}.skill-node button{margin-left:33px}.metric-row>div{padding:8px 12px}#armyIntel{display:none}.tabs button{padding:8px 12px}.event-banner{font-size:16px}.settings-panel h3{font-size:16px}.ticker-time{display:none}}
-@media(max-width:680px){.shell{width:calc(100vw - 16px)}.tv-sidebar{width:96px;padding:8px 6px}.tv-body{gap:7px}.pixel-button.chunky{padding:9px 4px;font-size:13px;min-height:50px}.chan-btn{padding:7px 5px;font-size:11px}.chan-btn>b{width:20px;height:20px}header{height:38px}.network>b{font-size:20px}.network>span{display:none}footer{font-size:10px;height:34px}.camera-top{top:3%;font-size:8px}.camera-top b{padding:2px 4px;margin-right:6px;border-width:1px;font-size:8px;box-shadow:2px 2px #571d36}.camera-top small{display:none}.camera-id{font-size:8px}.tv-menu{gap:6px}.inset{top:19%;width:17%;border-width:1px}.inset>div{font-size:8px;padding:2px}.inset>div span{display:none}.action-caption{bottom:18%;padding-left:5px;border-width:2px}.action-caption>span{font-size:8px}.action-caption small{font-size:8px;margin-top:3px}.lower-third{border-width:1px;height:13%;bottom:7%}.breaking{padding:4px 6px;border-width:1px}.breaking span{font-size:6px;letter-spacing:0}.breaking b{font-size:10px;text-shadow:1px 1px #722034;margin-top:3px}.headline{padding:3px 6px}.headline>span{font-size:6px}.headline h1{font-size:12px}.headline-viewport{margin:2px 0}.headline p{display:none}.live-bug b{font-size:14px}.live-bug>span{font-size:7px;margin-top:2px}.ticker{height:5.5%;border-top-width:1px}.ticker>b{font-size:8px;padding:0 8px;border-right-width:1px}.ticker-track>span{font-size:8px;letter-spacing:0;padding-right:32px}.management-screen{border-width:2px;padding:10px}.section-kicker{font-size:8px}.obs-title h2{font-size:16px;margin-top:3px}.obs-title{margin-bottom:7px}.obs-tools button{font-size:10px}.metric-row{border-width:1px}.metric-row>div{padding:5px 6px;border-right-width:1px}.metric-row small{font-size:8px}.metric-row strong{font-size:16px;margin:3px 0}.metric-row>div>span{font-size:8px}.research-bar{margin:6px 0;border-width:1px}.tabs{gap:3px}.tabs button{font-size:10px;padding:5px 7px;border-width:1px}.tabs button span{display:none}.upgrade-grid{gap:6px;grid-template-columns:1fr 1fr}.upgrade-card{padding:8px;border-width:1px}.upgrade-card p{font-size:10px;min-height:24px}.settings-panel{grid-template-columns:1fr}}
+@media(max-width:1050px){.pixel-button{padding:6px 9px}.tv-sidebar{width:120px}.camera-top small,.camera-id{font-size:10px}.camera-top small{margin-left:8px}.live-bug b{font-size:20px}.headline p{font-size:10px}.management-screen{padding:2%}.obs-title{margin-bottom:10px}.obs-tools>span{display:none}.upgrade-card{padding:10px}.upgrade-card h3{font-size:16px}.upgrade-card button{padding:8px 5px;gap:3px}.skill-tree{gap:10px}.skill-node{padding:8px;gap:6px;flex-wrap:wrap}.skill-node button{margin-left:33px}.metric-row>div{padding:8px 12px}#armyIntel{display:none}.tabs button{padding:8px 12px}.event-banner{font-size:16px}.settings-panel h3{font-size:16px}.ticker-time{display:none}}
+@media(max-width:680px){.shell{width:calc(100vw - 16px)}.tv-sidebar{width:96px;padding:8px 6px}.tv-body{gap:7px}.pixel-button.chunky{padding:9px 4px;font-size:13px;min-height:50px}.chan-btn{padding:7px 5px;font-size:11px}.chan-btn>b{width:20px;height:20px}header{height:38px}.network>b{font-size:20px}.network>span{display:none}footer{font-size:10px;height:34px}.camera-top{top:3%;font-size:8px}.camera-top b{padding:2px 4px;margin-right:6px;border-width:1px;font-size:8px;box-shadow:2px 2px #571d36}.camera-top small{display:none}.camera-id{font-size:8px}.tv-menu{gap:6px}.action-caption{bottom:18%;padding-left:5px;border-width:2px}.action-caption>span{font-size:8px}.action-caption small{font-size:8px;margin-top:3px}.lower-third{border-width:1px;height:13%;bottom:7%}.breaking{padding:4px 6px;border-width:1px}.breaking span{font-size:6px;letter-spacing:0}.breaking b{font-size:10px;text-shadow:1px 1px #722034;margin-top:3px}.headline{padding:3px 6px}.headline>span{font-size:6px}.headline h1{font-size:12px}.headline-viewport{margin:2px 0}.headline p{display:none}.live-bug b{font-size:14px}.live-bug>span{font-size:7px;margin-top:2px}.ticker{height:5.5%;border-top-width:1px}.ticker>b{font-size:8px;padding:0 8px;border-right-width:1px}.ticker-track>span{font-size:8px;letter-spacing:0;padding-right:32px}.management-screen{border-width:2px;padding:10px}.section-kicker{font-size:8px}.obs-title h2{font-size:16px;margin-top:3px}.obs-title{margin-bottom:7px}.obs-tools button{font-size:10px}.metric-row{border-width:1px}.metric-row>div{padding:5px 6px;border-right-width:1px}.metric-row small{font-size:8px}.metric-row strong{font-size:16px;margin:3px 0}.metric-row>div>span{font-size:8px}.research-bar{margin:6px 0;border-width:1px}.tabs{gap:3px}.tabs button{font-size:10px;padding:5px 7px;border-width:1px}.tabs button span{display:none}.upgrade-grid{gap:6px;grid-template-columns:1fr 1fr}.upgrade-card{padding:8px;border-width:1px}.upgrade-card p{font-size:10px;min-height:24px}.settings-panel{grid-template-columns:1fr}}
 @media(max-height:480px) and (orientation:landscape){.shell{width:min(calc(100vw - 10px),calc((100dvh - 20px)*16/9))}header,footer{display:none}.management-screen{padding:10px}.obs-title{margin-bottom:8px}.metric-row>div{padding:5px 8px}.metric-row strong{font-size:16px;margin:3px 0}}
 
 /* TV readability contract: every visible label >= the physical button label.
@@ -244,12 +250,10 @@ html:not(.panel-view){--tv-label:18px}
 html:not(.panel-view) .shell :is(span,small,b,strong,p,h1,i,button,div){font-size:max(var(--tv-label),1em)}
 html:not(.panel-view) .pixel-button.chunky .pb-tx{font-size:var(--tv-label)}
 html:not(.panel-view) .pixel-button.chunky .pb-ico{font-size:30px}
-html:not(.panel-view) .shell :is(.side-title,.chan-btn,.camera-top,.camera-top small,.camera-id,.inset>div,.inset>div span,.action-caption small,.event-banner small,.breaking span,.headline>span,.headline p,.live-bug>span,.ticker-track>span,.ticker-time){font-size:var(--tv-label);line-height:1.25;letter-spacing:0}
+html:not(.panel-view) .shell :is(.side-title,.chan-btn,.camera-top,.camera-top small,.camera-id,.action-caption small,.event-banner small,.breaking span,.headline>span,.headline p,.live-bug>span,.ticker-track>span,.ticker-time){font-size:var(--tv-label);line-height:1.25;letter-spacing:0}
 html:not(.panel-view) .camera-top{top:22%;font-size:18px}
 html:not(.panel-view) .camera-top>span{display:flex;align-items:center;gap:6px}
 html:not(.panel-view) .camera-top b{margin:0}
-html:not(.panel-view) .inset{top:30%;width:23%}
-html:not(.panel-view) .inset>div{flex-wrap:wrap;padding:4px}
 html:not(.panel-view) .action-caption{bottom:9%;max-width:68%}
 html:not(.panel-view) .action-caption>span{font-size:20px}
 html:not(.panel-view) .ticker{height:8%;min-height:34px}
