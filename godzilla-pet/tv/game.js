@@ -37,7 +37,6 @@ const FX_SCALE_MAX=Growth.bodyScale(FX_LOCK_LEVEL,null,null,P.EPOCHS);
 const sentinelRenderer=new window.SentinelBoss.Renderer(Image);
 const harborArt=new Image();harborArt.src=ASSETS.LAB_ART.harbor;
 const harborLayers=Object.fromEntries(['haze','far','mid','near'].map(key=>{const img=new Image();img.src=ASSETS.LAB_ART[key];return [key,img];}));
-const roadArt=new Image();roadArt.src=ASSETS.LAB_ART.road;
 let storageOK=true,raw=null;try{raw=JSON.parse(SAVEIO.getItem(SAVE)||'null');}catch{storageOK=false;}
 const pageSearch=window.location?.search||'';
 const panelMode=window.__panelMode===true||/([?&])panel=1(?:&|$)/.test(pageSearch);
@@ -550,7 +549,7 @@ function drawVillageGround(){
   drawChapterGround();
 }
 function harborLayersReady(){return Object.values(harborLayers).every(img=>img.complete&&img.naturalWidth);}
-function drawSky(){if(harborLayersReady()){const scale=sceneZoom*zoom*.8;window.HarborParallax.draw(ctx,harborLayers,camera,W,H,H*.72-38*scale,scale);return;}if(harborArt.complete&&harborArt.naturalWidth){drawHarborSky();return;}if(currentStage().key!=='city'){drawVillageSky();return;}const pal=currentChapter().sky,g=ctx.createLinearGradient(0,0,0,G);g.addColorStop(0,pal[0]);g.addColorStop(.65,pal[1]);g.addColorStop(1,pal[2]);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);drawSkyTimeMarker();
+function drawSky(){if(harborLayersReady()){window.HarborParallax.draw(ctx,harborLayers,camera,W,H,H*.72,sceneZoom*zoom*.8);return;}if(harborArt.complete&&harborArt.naturalWidth){drawHarborSky();return;}if(currentStage().key!=='city'){drawVillageSky();return;}const pal=currentChapter().sky,g=ctx.createLinearGradient(0,0,0,G);g.addColorStop(0,pal[0]);g.addColorStop(.65,pal[1]);g.addColorStop(1,pal[2]);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);drawSkyTimeMarker();
 for(let i=0;i<12;i++){let x=((i*179-time*4-camera*.08)%1500+1500)%1500-200,y=85+(i%4)*31;rect(x,y,180+i%3*40,14,'#102047');rect(x+30,y-12,100,18,'#102047');}
 for(let layer=0;layer<3;layer++){let factor=[.13,.26,.43][layer];for(let b of skyline[layer]){let x=b.x-camera*factor;if(x<-150||x>1400)continue;let bottom=G-50+layer*14,h=b.h*(.75+layer*.12);rect(x,bottom-h,b.w,h,currentChapter().skyline[layer]);rect(x+3,bottom-h+3,3,h-3,'#284371');rect(x+b.w/2,bottom-h-9,3,9,'#203c63');if(Math.sin(time*3+b.seed)>0)rect(x+b.w/2,bottom-h-12,4,4,'#fc4b80');for(let yy=bottom-h+13;yy<bottom-8;yy+=17){for(let xx=8;xx<b.w-8;xx+=14){let hash=((b.seed+Math.floor(yy)*17+xx*13)%29);if(hash>7)rect(x+xx,yy,6,7,hash>20?'#ffc65e':layer===0?'#37559c':'#648cc4');}}}}
 drawChapterLandmarks();
@@ -563,29 +562,21 @@ function drawHarborSky(){
   if(data.district>1){ctx.fillStyle='#142244';ctx.globalAlpha=Math.min(.22,(data.district-1)*.012);ctx.fillRect(0,0,W,G);ctx.globalAlpha=1;}
 }
 function drawHarborGround(){
-  // All three building baselines (G-14, G, G+32) sit on this shared street.
-  // The old water strip began at G, leaving the foreground buildings over water.
-  rect(-W,G-38,W*3,H-G+38,'#17233b');
-  const tileWidth=640,firstTile=Math.floor(camera/tileWidth)-2;
-  if(roadArt.complete&&roadArt.naturalWidth){
-    const iw=roadArt.naturalWidth,ih=roadArt.naturalHeight,split=Math.round(ih*.45);
-    for(let index=firstTile;index*tileWidth-camera<W*2;index++){
-      const x=index*tileWidth-camera,flipped=Math.abs(index%2)===1;
-      ctx.save();ctx.translate(x+(flipped?tileWidth:0),0);ctx.scale(flipped?-1:1,1);
-      ctx.drawImage(roadArt,0,0,iw,split,0,G-38,tileWidth,96);
-      ctx.drawImage(roadArt,0,split,iw,ih-split,0,G+58,tileWidth,65);
-      ctx.restore();
-    }
-  }else{
-    rect(-W,G-38,W*3,96,'#30394b');
-    for(let x=firstTile*tileWidth-camera;x<W*2;x+=80)rect(x,G+22,40,3,'#d8b574');
-    rect(-W,G+58,W*3,7,'#92979c');rect(-W,G+65,W*3,58,'#28394d');
+  // Orthographic side view: the walk plane starts at the actor's sole, y=G.
+  rect(-W,G,W*3,H-G,'#17263b');
+  rect(-W,G,W*3,4,'#637582');
+}
+function drawHarborFrontGround(){
+  // Draw after actors so the straight edge hides their soles without a visible road surface.
+  rect(-W,G-2,W*3,4,'#a5abb0');
+  rect(-W,G+2,W*3,9,'#35475b');
+  rect(-W,G+11,W*3,H-G,'#17263b');
+  for(let x=-(camera%160)-160;x<W+160;x+=160){
+    rect(x,G+15,155,2,'#2b4054');
+    rect(x+3,G+18,3,48,'#0d1a2b');
+    rect(x+9,G+32,36,4,'#42566a');
+    rect(x+92,G+54,55,3,'#263b50');
   }
-  // Continuous curb and small contact pads make the ground plane unambiguous.
-  rect(-W,G-38,W*3,3,'#8a8391');rect(-W,G+55,W*3,3,'#c9b284');
-  for(const b of buildings){if(b.x-camera<-250||b.x-camera>W+250)continue;rect(b.x-camera-5,b.ground+4,b.w+10,6,'#111a2ec4');}
-  rect(p.x-camera-60*BS,G-2,175*BS,7,'#090e22a8');
-  rect(-W,G+123,W*3,H-G-123,'#0a2238');
 }
 function drawGround(){if(harborArt.complete&&harborArt.naturalWidth){drawHarborGround();return;}if(currentStage().key!=='city'){drawVillageGround();return;}rect(0,G,W,H-G,'#061534');rect(0,G,W,7,'#67728a');rect(0,G+7,W,8,'#263c55');for(let x=-(camera%110);x<W;x+=110){rect(x,G+15,105,23,'#172942');rect(x+5,G+19,4,17,'#2f4057');rect(x+70,G+18,25,15,'#0b1a31');}rect(0,G+40,W,2,'#3f85b8');rect(0,G+43,W,H-G,'#052155');for(let i=0;i<175;i++){let x=((i*73-camera*.75+Math.sin(time*(i%3+1)+i)*16)%1320+1320)%1320,y=G+48+i%28*3;rect(x,y,10+i%6*8,2+i%2*2,['#123c81','#145fc5','#1454a6','#287ce3','#09409e'][i%5]);}
 for(let i=0;i<10;i++){let wx=((i*191-camera*.7)%1400+1400)%1400;for(let k=0;k<13;k++){let x=wx+Math.sin(time*2+k*.8+i)*13;rect(x-k*1.5,G+47+k*6,10+(k%4)*8,2,i%3===0?'#d25ea090':i%3===1?'#e6af5790':'#28b3ec90');}}
@@ -892,7 +883,7 @@ function drawSceneSwitch(g){
   g.fillText('正在接收下一区域信号',W/2,H/2+24);
   g.restore();
 }
-function render(){ctx.setTransform(.5,0,0,.5,0,0);ctx.clearRect(0,0,W,H);drawSky();ctx.save();let center=p.x-camera,s=sceneZoom*zoom*.8;ctx.translate(center,H*.72);ctx.scale(s,s);ctx.translate(-center,-G);if(shake>0)ctx.translate(Math.sin(time*90)*shake,Math.cos(time*73)*shake*.45);if(!harborLayersReady())drawSky();drawGround();if(harborLayersReady())drawPatrolHeli();drawBuildings(0);drawBuildings(1);drawWrecks();for(let e of enemies)if(alive(e))drawEnemy(e);drawGodzilla(SK,BS);drawSentinelBeam(sentinel());drawBeam();for(let b of bullets){let t=b.trail.map(v=>[v[0]-camera,v[1]]);if(t.length>1)line(t,b.type==='electric'?'#84dfff':'#ffa155',3);rect(b.x-camera-5,b.y-3,10,6,b.type==='electric'?'#bfffff':'#fff0a2');}for(let e of enemies)if(!alive(e))drawEnemy(e);for(let f of fires)if(Math.abs(f.x-camera-W/2)<W){const fireScale=fxScale(f.jitter);fire(f.x-camera,f.y,f.size*3.2*fireScale*Math.min(1,(24-f.age)/8));}drawParticles();drawBuildings(2);drawForeground();drawWeather();ctx.restore();drawCampaignRoute();const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'#01091b65');shade.addColorStop(.2,'#010a1900');shade.addColorStop(.75,'#010a1900');shade.addColorStop(1,'#02091b88');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);drawBossHealth();drawBossCutin();out.drawImage(buffer,0,0,W,H);
+function render(){ctx.setTransform(.5,0,0,.5,0,0);ctx.clearRect(0,0,W,H);drawSky();ctx.save();let center=p.x-camera,s=sceneZoom*zoom*.8;ctx.translate(center,H*.72);ctx.scale(s,s);ctx.translate(-center,-G);if(shake>0)ctx.translate(Math.sin(time*90)*shake,Math.cos(time*73)*shake*.45);if(!harborLayersReady())drawSky();drawGround();if(harborLayersReady())drawPatrolHeli();drawBuildings(0);drawBuildings(1);drawWrecks();for(let e of enemies)if(alive(e))drawEnemy(e);drawGodzilla(SK,BS);drawSentinelBeam(sentinel());drawBeam();for(let b of bullets){let t=b.trail.map(v=>[v[0]-camera,v[1]]);if(t.length>1)line(t,b.type==='electric'?'#84dfff':'#ffa155',3);rect(b.x-camera-5,b.y-3,10,6,b.type==='electric'?'#bfffff':'#fff0a2');}for(let e of enemies)if(!alive(e))drawEnemy(e);for(let f of fires)if(Math.abs(f.x-camera-W/2)<W){const fireScale=fxScale(f.jitter);fire(f.x-camera,f.y,f.size*3.2*fireScale*Math.min(1,(24-f.age)/8));}drawParticles();drawBuildings(2);if(harborLayersReady())drawHarborFrontGround();drawForeground();drawWeather();ctx.restore();drawCampaignRoute();const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'#01091b65');shade.addColorStop(.2,'#010a1900');shade.addColorStop(.75,'#010a1900');shade.addColorStop(1,'#02091b88');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);drawBossHealth();drawBossCutin();out.drawImage(buffer,0,0,W,H);
 /* 换场雪花盖在最上面 —— 它必须压住推图条 / 暗角 / 频道画面，否则"遮满屏幕"
  * 这句话只在部分图层上成立。哪个画布在显示就画在哪个上（转台与直播两态都覆盖）。 */
 if(channel!=='live'){drawChannel();if(bossCutinActive())channelCtx.drawImage(canvas,0,0,W,H);}drawSceneSwitch(out);if(channel!=='live')drawSceneSwitch(channelCtx);}
@@ -979,6 +970,9 @@ function syncAssignHologram(){
 }
 function drawAssignHologram(c,rig,t){
   const g=c.getContext('2d'),w=c.width,h=c.height;
+  const terminal=$('management').dataset.page==='overview';
+  const cycle=t?(t-Number(c.dataset.scanStart||0))%12:12;
+  const typed=(str,index)=>str.slice(0,t?Math.max(0,Math.floor((cycle-index*.28)*25)):str.length);
   g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,w,h);g.imageSmoothingEnabled=false;
   g.fillStyle='#0b142b';g.fillRect(0,0,w,h);
   if(harborArt.complete&&harborArt.naturalWidth){g.drawImage(harborArt,0,0,w,h);g.fillStyle='#0b142bdc';g.fillRect(0,0,w,h);}
@@ -987,7 +981,7 @@ function drawAssignHologram(c,rig,t){
   for(let y=0;y<h;y+=24){g.beginPath();g.moveTo(0,y);g.lineTo(w,y);g.stroke();}
   const bs=Growth.bodyScale(data.level,data.talents,data.morph,P.EPOCHS),bounds=KaijuRig.BIND_BOUNDS;
   // Fit the actual current shape; physical scale remains explicit in the readout.
-  const fit=Math.min(w*.64/((bounds.x1-bounds.x0)*bs),h*.66/((bounds.y1-bounds.y0)*bs));
+  const fit=Math.min(w*(terminal?.48:.64)/((bounds.x1-bounds.x0)*bs),h*.66/((bounds.y1-bounds.y0)*bs));
   const ax=w/2-(bounds.x0+bounds.x1)*bs*fit/2,ay=h*.85;
   const pose=KaijuRig.pose({x:0,ground:0,moving:false,step:0,action:{name:t?'walk':'neutral',t:0}},t);
   const sk=scaleRig(pose,bs,0,0);
@@ -1008,14 +1002,29 @@ function drawAssignHologram(c,rig,t){
     {q:sk.muzzle,x:w-16,y:h*.16,name:'口部 / 炉心',value:Math.round(economy.atomic())+' 伤害',side:-1},
     {q:sk.foot,x:w-16,y:h*.72,name:'后肢 / 动能',value:'速度 '+Math.round(economy.speed()),side:-1}
   ];
-  g.font='17px Pixel, monospace';
-  labels.forEach(a=>{
+  if(terminal){
+    labels[0].y=h*.19;labels[1].y=h*.43;labels[2].y=h*.19;labels[3].y=h*.43;
+    labels.push(
+      {q:sk.bones.torso,x:16,y:h*.67,name:'GROWTH / 成长经验',value:Math.floor(data.xp)+' / '+economy.nextXP(),side:1},
+      {q:sk.bones.tail_tip,x:16,y:h*.85,name:'GENOME / 基因档案',value:data.mutations.length+' 项变异记录',side:1},
+      {q:sk.bones.head,x:w-16,y:h*.67,name:'SECTOR / 区域记录',value:'区域 '+data.district+' · '+Math.floor(data.meters)+' m',side:-1},
+      {q:sk.bones.torso,x:w-16,y:h*.85,name:'COMBAT / 战斗记录',value:data.kills+' 击破 / '+data.cleared+' 破坏',side:-1}
+    );
+  }
+  g.font=(terminal?'14':'17')+'px Pixel, monospace';
+  labels.forEach((a,i)=>{ 
     const x=ax+a.q.x*fit,y=ay+a.q.y*fit,edge=a.x+a.side*122;
-    g.strokeStyle='#68acb6';g.beginPath();g.moveTo(x,y);g.lineTo(edge,a.y+25);g.lineTo(a.x,a.y+25);g.stroke();
-    g.fillStyle='#a7f1ee';g.fillRect(x-2,y-2,4,4);
-    g.fillStyle='#0b142bee';g.fillRect(a.side===1?a.x-3:a.x-130,a.y-19,133,46);
-    g.textAlign=a.side===1?'left':'right';g.fillStyle='#dceaff';g.fillText(a.name,a.x,a.y);g.fillStyle='#8fe7c4';g.fillText(a.value,a.x,a.y+22);
+    if(i<4){g.strokeStyle='#68acb6';g.beginPath();g.moveTo(x,y);g.lineTo(edge,a.y+25);g.lineTo(a.x,a.y+25);g.stroke();
+    g.fillStyle='#a7f1ee';g.fillRect(x-2,y-2,4,4);}
+    const box=terminal?174:133;g.font=(terminal?(i<4?'14':'12'):'17')+'px Pixel, monospace';
+    g.fillStyle='#0b142bee';g.fillRect(a.side===1?a.x-3:a.x-box+3,a.y-19,box,46);
+    g.textAlign=a.side===1?'left':'right';g.fillStyle='#dceaff';g.fillText(terminal?typed(a.name,i*2):a.name,a.x,a.y);g.fillStyle='#8fe7c4';g.fillText(terminal?typed(a.value,i*2+1):a.value,a.x,a.y+22);
   });
+  if(terminal){
+    g.textAlign='left';g.font='11px Pixel, monospace';g.fillStyle='#72afbb';
+    g.fillText(typed('BIO-SCAN // LIVE LINK · 生体数据持续同步',0),16,h-12);
+    g.textAlign='right';g.fillText(cycle<5?'READING_':'SCAN COMPLETE · 待命',w-16,h-12);
+  }
   g.textAlign='center';g.fillStyle='#b9dfdc';g.font='12px Pixel, monospace';
   if(!rig.ready)g.fillText(rig.failures.length?'部件加载失败 · 请检查资源':'正在装配真实骨骼…',w/2,115);
   c.dataset.level=String(data.level);c.dataset.bodyScale=bs.toFixed(3);c.dataset.spines=String(decor.spikes.count);c.dataset.rigReady=String(rig.ready);

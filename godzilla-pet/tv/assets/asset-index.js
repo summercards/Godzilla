@@ -20,7 +20,7 @@
   const ENEMY_DIR = 'enemies';
   const BUILDING_DIR = 'buildings';
   const TV_SKINS = {neon:{controls:'assets/skins/neon/right-controls.png'}};
-  const LAB_ART = {harbor:'assets/lab/harbor.png',road:'assets/lab/harbor-road.png',haze:'assets/lab/harbor-haze.png',far:'assets/lab/harbor-far.png',mid:'assets/lab/harbor-mid.png',near:'assets/lab/harbor-near.png',platform:'assets/lab/kaiju-platform.png',mutation:'assets/lab/mutation-chamber.png',talent_icons:'assets/lab/talent-icons.png'};
+  const LAB_ART = {harbor:'assets/lab/harbor.png',haze:'assets/lab/harbor-haze.png',far:'assets/lab/harbor-far.png',mid:'assets/lab/harbor-mid.png',near:'assets/lab/harbor-near.png',platform:'assets/lab/kaiju-platform.png',mutation:'assets/lab/mutation-chamber.png',talent_icons:'assets/lab/talent-icons.png'};
 
   /** 骨骼槽：与 rig.js 的 12 个变换节点一一对应。
    *  这些名字同时就是 parts/ 下的目录名，改名等于改骨骼契约，

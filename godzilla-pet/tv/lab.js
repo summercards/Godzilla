@@ -46,6 +46,7 @@ const snapshot=()=>JSON.parse(window.__growth.snapshot());
 const stats=e=>({power:Math.round(e.power()),atomic:Math.round(e.atomic()),metabolism:e.passive().toFixed(1)+'/秒',stride:Math.round(e.speed())});
 const send=(id)=>{if(window.__panelHost)window.__panelHost.command({id});else if(window.opener?.__growth)window.opener.__growth.command({id});};
 function show(key,fromGame=false){
+ if(key==='overview'&&page!==key)$('assignHologram').dataset.scanStart=String(performance.now()/1000);
  page=key;management.dataset.page=key;overview.hidden=key!=='overview';extra.hidden=!['analysis','codex','nurture'].includes(key);
  for(const id of ['assign','talent','evo','settings','news','stats'])$(id+'Panel').hidden=id!==key;
  document.querySelectorAll('.lab-nav button').forEach(b=>{b.setAttribute('aria-current',b.dataset.page===key?'page':'false');});

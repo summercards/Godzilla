@@ -150,3 +150,15 @@ html:not(.panel-view) .headline h1{font-size:20px!important}
 .panel-view .talent-node.locked .talent-icon.has-art{filter:grayscale(1) brightness(.5)}
 .panel-view .talent-detail-head .talent-icon.has-art{width:81px;height:54px;padding:0;image-rendering:pixelated;flex:none;background-color:#0a172c}
 .panel-view .lab-card:after{content:'';position:absolute;right:-2px;bottom:-2px;width:12px;height:12px;border-right:3px solid #8c92a7;border-bottom:3px solid #8c92a7;pointer-events:none}
+/* Overview is one full-width scanning terminal, with the live specimen at its centre. */
+.panel-view .lab-management[data-page=overview] .lab-body{display:block;height:100%;padding-top:10px}
+.panel-view .lab-management[data-page=overview] .lab-work,
+.panel-view .lab-management[data-page=overview] .hero-actions,
+.panel-view .lab-management[data-page=overview] .hero-label,
+.panel-view .lab-management[data-page=overview] .holo-readout,
+.panel-view .lab-management[data-page=overview] .monitor-caption{display:none}
+.panel-view .lab-management[data-page=overview] .lab-hero{position:relative;top:0;height:calc(100vh - 210px);min-height:390px;background:#091426;border:1px solid #50758a;padding:4px}
+.panel-view .lab-management[data-page=overview] .monster-monitor{margin:0;border:1px solid #35546c}
+.panel-view .lab-management[data-page=overview] .monster-monitor figcaption{padding:14px 18px;font-size:20px;background:#0a172a;color:#8ddff0;letter-spacing:2px}
+.panel-view .lab-management[data-page=overview] .monster-monitor figcaption strong{font-size:17px;color:#c2e9d9}
+@media(max-width:680px){.panel-view .lab-management[data-page=overview] .lab-hero{height:calc(100vh - 190px);min-height:470px}.panel-view .lab-management[data-page=overview] .monster-monitor figcaption{font-size:15px;letter-spacing:0}}
