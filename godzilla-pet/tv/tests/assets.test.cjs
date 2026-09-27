@@ -199,7 +199,12 @@ test('assets: 命名规范（小写 ASCII + 下划线，无中文无大写无版
 /* ------------------------------------------------------------------ */
 test('assets: 资产根目录里没有多余的散落文件', () => {
   // 允许的顶层项只有：索引模块、字库、三大类目录
-  const allowed = new Set(['asset-index.js', 'fonts', 'monsters', 'enemies', 'buildings']);
+  const allowed = new Set(['asset-index.js', 'fonts', 'monsters', 'enemies', 'buildings', 'lab']);
   const stray = fs.readdirSync(ASSETS_DIR).filter((n) => !allowed.has(n));
   assert.deepEqual(stray, [], 'tv/assets 顶层出现未归类的东西：' + stray.join('、') + '（归入 monsters/ enemies/ buildings/ 之一，或写进规范）');
+});
+
+test('assets: 研究所插画清单与实际文件一致', () => {
+  const declared=Object.values(require('../assets/asset-index.js').LAB_ART).map(p=>p.split('/').pop()).sort();
+  assert.deepEqual(fs.readdirSync(path.join(ASSETS_DIR,'lab')).sort(),declared);
 });

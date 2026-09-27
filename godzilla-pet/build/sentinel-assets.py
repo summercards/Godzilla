@@ -41,7 +41,9 @@ for i,name in enumerate(order):
  img=Image.fromarray(part);bounds=img.getbbox();assert bounds,name
  x,y,x1,y1=bounds
  dest=base/'parts'/name;dest.mkdir(parents=True,exist_ok=True);img.crop(bounds).save(dest/'default.png')
- a=slots[name];metadata['slots'][name]={'parent':a['parent'],'pivot':a['pivot'],'bounds':list(bounds)}
+ visible=np.where(part[:,:,3]>=16,255,0).astype(np.uint8)
+ visibleBounds=Image.fromarray(visible).getbbox();assert visibleBounds,name
+ a=slots[name];metadata['slots'][name]={'parent':a['parent'],'pivot':a['pivot'],'bounds':list(bounds),'visibleBounds':list(visibleBounds)}
  # Original textured joint cap; only drawn when a joint rotates.
  if name!='torso':
   px,py=a['pivot'];r=46 if 'thigh' in name or name in ['arm','far_arm'] else 34

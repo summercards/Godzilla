@@ -73,7 +73,7 @@ test('实际 doStomp 消费 Growth.spineBonus 返回值，范围变大但伤害�
     const env = {
       economy:{power:()=>100,has:()=>seismic},data:{level,morph},p:{x:1000},G:590,
       Growth:{spineBonus:(l,m)=>{calls.push([l,m]);return level===14?0:.25;}},
-      buildings,enemies,rings:[],alive:e=>e.state==='alive',explosion(){},burst(){},broadcast(){},
+      buildings,enemies,rings:[],alive:e=>e.state==='alive',bossEntity:()=>false,explosion(){},burst(){},broadcast(){},
       damageBuilding:(b,n)=>{b.hp-=n;},damageEnemy:(e,n)=>{e.hp-=n;},
     };
     vm.runInNewContext(functionSource('doStomp','doRoar')+';doStomp();',env);

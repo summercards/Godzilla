@@ -1,5 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const P=require('../progression.js');
+const Boss=require('../sentinel.js'),Rig=require('../rig.js');
 const game=fs.readFileSync(path.join(__dirname,'../game.js'),'utf8');
 const panelPreload=fs.readFileSync(path.join(__dirname,'../../panel-preload.js'),'utf8');
 
@@ -19,7 +20,7 @@ const makeBoss=x=>({x,y:590-180,type:'sentinel',state:'alive',phase:0,cd:2,hit:0
 
 function scenario(px=100){
   const env={P,LENGTH,W,G:590,console,panelMode:false,
-    sceneZoom:1.25,                                   // 幼兽档镜头（s = 1.25×0.8 = 1.0）
+    sceneZoom:1.25,zoom:1,window:{SentinelBoss:Boss},KaijuRig:Rig,bodyScale:()=>.34,
     clamp:(x,a,b)=>Math.max(a,Math.min(b,x)),
     cameraTarget:()=>env.p.x-KAIJU_SCREEN_X,          // 相机稳态：巨兽恒在屏幕 425
     data:{district:1,cleared:0,kills:0,dna:0,level:10,meters:0,xp:0,world:{},levels:{power:1,atomic:1,metabolism:1,stride:1}},
@@ -89,7 +90,7 @@ test('5 · 点下按钮：进入挑战、Boss 就位到降临起点、按钮熄�
   const boss=env.enemies.find(e=>e.type==='sentinel');
   const lead=run('bossIntroLead()');
   assert.equal(boss.x,env.p.x+lead,'armBossIntro 把 Boss 钉到登场位');
-  assert.ok(KAIJU_SCREEN_X+lead*env.sceneZoom*0.8>=W*2/3,'登场位必须落在画面右侧三分之一');
+  assert.ok(KAIJU_SCREEN_X+lead*env.sceneZoom*0.8<W-100,'登场位应保持在画面中');
   assert.equal(run('bossChallengeStarted'),true);
   assert.equal(run('bossChallengeAvailable()'),false,'开战后按钮必须熄灭');
   assert.ok(env.saves>before,'requestNextMap 必须 save()（nodeArmed/挑战态落盘）');
@@ -122,7 +123,7 @@ test('7 · 存档契约：挑战态/锁存随档落盘，跨区读档不复活�
   const restore=game.slice(game.indexOf('bossChallengeStarted=restore'),game.indexOf("bossChallengeStarted=restore")+260);
   assert.ok(restore.includes("restore?.district===data.district&&restore.bossChallengeStarted===true"));
   assert.ok(restore.includes("restore?.district===data.district&&restore.nodeArmed===true"),'锁存必须随档恢复，重启不丢资格');
-  assert.ok(game.includes('updateEnemies(dt);armNodeGate();'),'armNodeGate 必须挂在每帧 update 上');
+  assert.ok(/updateEnemies\(dt\);(?:keepBossApart\(dt\);)?armNodeGate\(\);/.test(game),'armNodeGate 必须挂在每帧 update 上');
   assert.ok(game.includes('const challenge=bossChallengeAvailable()')&&game.includes('nextButton.disabled=!challenge'),"hud() 的按钮态只认 bossChallengeAvailable 这一个真源");
 });
 
@@ -180,9 +181,9 @@ test('11 · 登场位：无论 Boss 原先站在哪，点按钮后都必须被�
   assert.equal(boss.x,held,'演出已开始（introStarted）就不再干预，免得把起跳中的 Boss 拽回去');
 });
 
-test('12 · 登场位的数值不变式：按屏幕位置反解，三种体型档都落在右侧 1/3',()=>{
-  const src=game.slice(game.indexOf('const BOSS_SCREEN_X'),game.indexOf('function nodeAnchorXAt'));
-  assert.ok(src.includes('BOSS_IN_RANGE-120'),'登场位上限必须由 BOSS_IN_RANGE 派生（越过 = 点了没反应的死档）');
+test('12 · 登场位的数值不变式：三种镜头档保持可见间隔',()=>{
+  const src=game.slice(game.indexOf('const BOSS_PIXEL_GAP'),game.indexOf('function nodeAnchorXAt'));
+  assert.ok(src.includes('BOSS_PIXEL_GAP/s'),'必须把屏幕像素间隔换算成世界距离');
   assert.ok(!/NODE_LEAD|BOSS_INTRO_LEAD/.test(game),'别再留第二份登场位常量（写死世界距离会在不同体型漂到画面中间）');
   /* 三种档位：幼兽镜头拉近（s=1.0）、成体、灾厄体镜头拉远（s≈0.51）。
    * 写死世界距离的老做法在灾厄体会缩回 68%，按屏幕反解必须都落在右侧 1/3。 */
@@ -191,8 +192,19 @@ test('12 · 登场位的数值不变式：按屏幕位置反解，三种体型�
     env.sceneZoom=zoom;env.cameraTarget=()=>env.p.x-kaiju;
     const lead=run('bossIntroLead()');
     const screenX=kaiju+lead*zoom*0.8;
-    assert.ok(screenX>=W*2/3,`${label}：登场位只落在 ${Math.round(screenX/W*100)}%，不在画面右侧 1/3`);
-    assert.ok(lead>=120,`${label}：登场位 ${lead} 太近，会砸在巨兽身上`);
-    assert.ok(lead<=BOSS_IN_RANGE-120,`${label}：登场位 ${lead} 越过触发半径（${BOSS_IN_RANGE}）会变成"点了没反应"的死档`);
+    assert.ok(screenX>kaiju+10,`${label}：两者间距不足`);
+    assert.ok(screenX<W-100,`${label}：Boss 被放到画面之外`);
+    assert.ok(lead<BOSS_IN_RANGE,`${label}：常规体型应留在登场触发半径内`);
   }
+});
+test('13 · 小到巨大体型的 Boss 贴图与怪兽受击盒至少隔 10 屏幕像素',()=>{
+ for(const scale of [.34,1,1.5,2]){
+  const {env,run}=scenario(4000);env.bodyScale=()=>scale;
+  run('armNodeGate()');assert.equal(run('requestNextMap()'),'challenge');
+  const boss=env.enemies[0],right=Rig.hitbox(scale,env.p.x,env.G).x1,s=env.sceneZoom*.8;
+  const clips=[{introDone:true},...Boss.MELEES.map(m=>({introDone:true,meleeKind:m.id,meleeTime:m.hit})),{introDone:true,beamTime:Boss.BEAM.charge+.2}];
+  for(const clip of clips){boss.meleeTime=null;boss.beamTime=null;Object.assign(boss,clip);run('keepBossApart(1)');const edge=boss.x+Boss.leftEdge(boss);assert((edge-right)*s>=10,`scale ${scale}: painted gap ${(edge-right)*s}`);}
+  env.bodyScale=()=>scale*1.1;run('keepBossApart(1)');
+  assert((boss.x+Boss.leftEdge(boss)-Rig.hitbox(scale*1.1,env.p.x,env.G).x1)*s>=10,'growth must also preserve the gap');
+ }
 });

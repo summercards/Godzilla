@@ -66,7 +66,10 @@ test('3 · 同一条时间轴：defeat 起雪花、updateEnemies 在 BOSS_FALL �
 
 test('4 · 雪花必须压在所有图层之上，且两个画布（直播 / 转台）都覆盖',()=>{
   // 画在 render 末尾：推图条 / 暗角 / 频道画面都已经画完，雪花才盖上去
-  assert.match(game,/if\(channel!=='live'\)drawChannel\(\);drawSceneSwitch\(out\);if\(channel!=='live'\)drawSceneSwitch\(channelCtx\);\}/,
+  const render=game.slice(game.indexOf('function render('),game.indexOf('const ACTIONS='));
+  assert(render.indexOf('drawSceneSwitch(out)')>render.indexOf('drawChannel()'));
+  assert(render.indexOf('drawSceneSwitch(out)')>render.indexOf('channelCtx.drawImage(canvas'));
+  assert.match(render,/drawSceneSwitch\(out\);if\(channel!=='live'\)drawSceneSwitch\(channelCtx\);\}/,
     'drawSceneSwitch 没有盖在 render 的最后（会在推图条或频道画面之下，遮不满）');
   // 噪点用 hash 而非 Math.random —— 画面噪声不该消耗熵源（同"外观只用 hashSeed+mulberry32"）
   assert.match(game,/function noiseGrain\(a,b\)\{const n=Math\.sin\(a\*12\.9898\+b\*78\.233\)\*43758\.5453;return n-Math\.floor\(n\);\}/,

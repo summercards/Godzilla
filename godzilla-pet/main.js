@@ -437,8 +437,8 @@ function buildWindow() {
  * 非 null 就代表面板正开着。 */
 let panelWin = null;
 
-let panelKey = 'assign';
-const PANEL_KEYS = new Set(['assign', 'talent', 'evo', 'stats', 'skills', 'news', 'settings']);
+let panelKey = 'overview';
+const PANEL_KEYS = new Set(['overview', 'assign', 'talent', 'evo', 'stats', 'skills', 'news', 'settings']);
 
 /* 把面板窗口摆在电视窗口旁边，跟它成对。
  *
@@ -467,7 +467,7 @@ function placePanel() {
  * 面板窗口加载的是同一份 tv 页面、同一份 game.js，所以四个页面连同交互
  * 是它自己画好的，一行都没重写。它唯一被限制的是不准写存档
  * （见 panel-preload.js），落盘由电视窗口独占，否则两个实例会互相覆盖。 */
-function openPanel(key = 'assign') {
+function openPanel(key = 'overview') {
   if (reloading || !win || win.isDestroyed() || !PANEL_KEYS.has(key)) return;
   panelKey = key;
   win.webContents.send('tv:snapshot');
