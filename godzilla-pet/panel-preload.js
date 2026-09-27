@@ -79,3 +79,9 @@ ipcRenderer.on('panel:sync', (_e, payload) => {
   mem = payload;
   growth?.sync(payload);
 });
+
+contextBridge.exposeInMainWorld('__tvSkin', {
+ get:()=>ipcRenderer.invoke('tv:skin:get'),
+ set:(skin)=>ipcRenderer.invoke('tv:skin:set',skin),
+ subscribe:(callback)=>ipcRenderer.on('tv:skin:changed',(_event,skin)=>callback(skin)),
+});

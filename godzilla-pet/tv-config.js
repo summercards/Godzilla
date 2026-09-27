@@ -57,9 +57,9 @@ const TV_SIZES = {
  * 默认 1280×820；小工作区由 panelBounds 限制到屏幕内并使用响应式布局。
  * 三档都保持横向构图，电视尺寸不受影响。 */
 const PANEL_SIZES = {
-  compact: { w: 960, h: 720, label: '紧凑' },
-  standard: { w: 1280, h: 820, label: '标准' },
-  tall: { w: 1560, h: 920, label: '宽屏' },
+  compact: { w: 720, h: 560, label: '紧凑' },
+  standard: { w: 900, h: 660, label: '标准' },
+  tall: { w: 1120, h: 780, label: '宽屏' },
 };
 
 /* 原版是给浏览器写的，不认得 frameless 窗口——没有标题栏就没有拖动把手。
@@ -260,6 +260,14 @@ function panelBounds(main, size, area, gap = 10) {
   }
   return { x: Math.round(x), y: Math.round(y), width, height };
 }
+function pairedBounds(main, desired, area, gap = 12) {
+  const margin=8, aw=Math.max(1,area.width-margin*2), ah=Math.max(1,area.height-margin*2);
+  const width=Math.min(main.width,Math.max(240,aw*.42)),height=Math.min(ah,Math.round(width*main.height/main.width));
+  const pw=Math.min(desired.width,aw-width-gap),ph=Math.min(desired.height,ah);
+  const x=Math.round(Math.max(area.x+margin,Math.min(main.x,area.x+area.width-margin-width-pw-gap)));
+  const y=Math.round(Math.max(area.y+margin,Math.min(main.y,area.y+area.height-margin-Math.max(height,ph))));
+  return {main:{x,y,width:Math.round(width),height},panel:{x:Math.round(x+width+gap),y,width:Math.max(1,Math.floor(pw)),height:ph}};
+}
 const zoomFor = (w) => w / VIEWPORT.w;
 
 /* 面板档位 → panelBounds 吃的窗口尺寸。
@@ -276,5 +284,5 @@ const panelBox = (key) => {
 module.exports = {
   VIEWPORT, TV_SIZES, PANEL_SIZES,
   TV_DRAG_CSS, TV_TRANSPARENT_CSS, TV_STARTUP_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS,
-  zoomFor, panelBounds, panelBox,
+  zoomFor, panelBounds, panelBox, pairedBounds,
 };

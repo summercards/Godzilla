@@ -78,7 +78,8 @@ if [ ! -x "\$ELECTRON" ]; then
   osascript -e 'display alert "巨兽都市桌宠" message "找不到 Electron 运行时。\n项目目录可能被移动了，请重新执行：\n\n  sh build/make-app.sh"' >/dev/null 2>&1 || true
   exit 1
 fi
-exec "\$ELECTRON" "\$PROJ"
+unset ELECTRON_RUN_AS_NODE
+exec "\$ELECTRON" --in-process-gpu --disable-gpu --no-sandbox "\$PROJ"
 LAUNCHER
 chmod +x "$OUT/Contents/MacOS/launch"
 

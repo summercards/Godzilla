@@ -83,7 +83,7 @@ test('启动器：必须把项目目录作为第一个参数交给 Electron', ()
   const src = fs.readFileSync(path.join(app, 'Contents', 'MacOS', 'launch'), 'utf8');
   // 这一行就是整个包装存在的理由。漏掉 "$PROJ"，Electron 就读不到我们的
   // 主进程，转而显示它自带的欢迎页——而且不会有任何报错。
-  assert.match(src, /exec\s+"\$ELECTRON"\s+"\$PROJ"\s*$/m,
+  assert.match(src, /exec\s+"\$ELECTRON"\s+--in-process-gpu\s+--disable-gpu\s+--no-sandbox\s+"\$PROJ"\s*$/m,
     '启动器没有把项目目录传给 Electron，会退回欢迎页');
 });
 

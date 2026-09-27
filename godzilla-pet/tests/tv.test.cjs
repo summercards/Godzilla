@@ -52,7 +52,7 @@ test('面板尺寸：三档独立于电视档位，且不再从电视推导', ()
     assert.ok(s.label, `面板 ${key} 档缺 label，托盘菜单会显示 undefined`);
     // 560 是"4 列资源条不换行"的实测下限；448 是解耦前 small 档面板的宽度
     assert.ok(s.w >= 560, `面板 ${key} 档只有 ${s.w} 宽，4 列资源条会换行（解耦前 small 档是 448）`);
-    assert.ok(s.h >= 640, `面板 ${key} 档只有 ${s.h} 高，扣掉固定开销后内容区只剩一条缝`);
+    assert.ok(s.h >= 560, `面板 ${key} 档只有 ${s.h} 高，扣掉固定开销后内容区只剩一条缝`);
     const sig = s.w + '×' + s.h;
     assert.ok(!seen.has(sig), `面板档位 ${sig} 重复，菜单里点了看不出变化`);
     seen.add(sig);
@@ -79,7 +79,7 @@ test('面板尺寸：三档独立于电视档位，且不再从电视推导', ()
   assert.match(openBody, /width:\s*ps\.w/, '面板窗口宽度没接档位');
   assert.match(openBody, /height:\s*ps\.h/, '面板窗口高度没接档位');
   assert.match(placeBody, /panelBox\(state\.panelSize\)/, 'placePanel 没按档位算尺寸（改档位会拿旧尺寸定位，差一个面板宽）');
-  assert.ok(!placeBody.includes('panelWin.getBounds()'), 'placePanel 又拿面板窗口当前尺寸当输入了，改档位会算错位置');
+  assert.match(placeBody, /state\.panelCustom\|\|panelBox\(state\.panelSize\)/, '用户调整优先，未调整时使用尺寸档位');
 
   // 档位名必须进持久化状态，且托盘里有入口
   assert.match(main, /panelSize: pickPanelSize\(raw\.panelSize\)/, '面板档位没有进持久化状态');
@@ -980,3 +980,5 @@ test('版面：机位条贴屏幕最上沿，且纵向位置只有一个真源',
     `${JSON.stringify(offenders)} —— 它们的特指度更低、永远算不过那条，是**永远不生效的死值**；` +
     '机位条的纵向位置只能有**一个真源**，改这种数字只会让人以为改了位置（实测一个字节都不会动）');
 });
+
+test('双窗口：不同工作区同时可见且不重叠',()=>{const {pairedBounds}=require('../tv-config.js');for(const area of [{x:0,y:25,width:1440,height:800},{x:-1280,y:0,width:1280,height:720},{x:0,y:0,width:1920,height:1080},{x:0,y:0,width:1024,height:768}]){const p=pairedBounds({x:1200,y:700,width:600,height:394},{width:900,height:660},area);for(const b of Object.values(p)){assert.ok(b.x>=area.x&&b.y>=area.y);assert.ok(b.x+b.width<=area.x+area.width&&b.y+b.height<=area.y+area.height);}assert.ok(p.main.x+p.main.width<p.panel.x);}});

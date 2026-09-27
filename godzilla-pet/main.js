@@ -17,7 +17,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, screen, shell, dialog, nativeIm
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { TV_DRAG_CSS, TV_TRANSPARENT_CSS, TV_STARTUP_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, PANEL_SIZES, zoomFor, panelBounds, panelBox } = require('./tv-config.js');
+const { TV_DRAG_CSS, TV_TRANSPARENT_CSS, TV_STARTUP_CSS, PANEL_ONLY_CSS, PANEL_READABLE_CSS, TV_SIZES, PANEL_SIZES, zoomFor, panelBounds, panelBox, pairedBounds } = require('./tv-config.js');
 const { createStore } = require('./save-store.js');
 const { createLogger } = require('./log-store.js');
 const { createSaveGuard } = require('./save-guard.js');
@@ -220,6 +220,8 @@ function loadState() {
   state = {
     size: pickSize(raw.size && typeof raw.size === 'object' ? raw.size.tv : raw.size),
     panelSize: pickPanelSize(raw.panelSize),
+    tvSkin: raw.tvSkin==='classic'?'classic':'neon',
+    panelCustom: raw.panelCustom&&Number.isFinite(raw.panelCustom.width)&&Number.isFinite(raw.panelCustom.height)?{width:Math.max(480,raw.panelCustom.width),height:Math.max(400,raw.panelCustom.height)}:null,
     pos: pickPos(pos) || pickPos(legacyPos),
     alwaysOnTop: raw.alwaysOnTop !== false,
     hidden: raw.hidden === true,
@@ -322,7 +324,7 @@ function buildWindow() {
     backgroundColor: '#00000000',
     frame: false,
     hasShadow: false,
-    resizable: false,
+    resizable: true,
     maximizable: false,
     minimizable: false,
     fullscreenable: false, // 挡住页面里的"全屏直播"——小电视不该变成全屏
@@ -339,6 +341,8 @@ function buildWindow() {
     },
   });
   win = w;
+  w.setAspectRatio(size.w/size.h);
+  w.setMinimumSize(280,184);
 
   /* 窗口的物理尺寸与缩放系数是"版面看起来对不对"的全部输入，记下来 ——
    * 玩家截图里画面偏了，第一件事就是比对这一行。
@@ -428,7 +432,7 @@ function buildWindow() {
 
   // 面板窗口开着时跟随主电视位置。
   w.on('moved', placePanel);
-  w.on('resize', placePanel);
+  w.on('resize', () => {w.webContents.setZoomFactor(zoomFor(w.getBounds().width));placePanel();});
 
   return w;
 }
@@ -445,7 +449,9 @@ const PANEL_KEYS = new Set(['overview', 'assign', 'talent', 'evo', 'stats', 'ski
  * 优先右侧（面板是电视的"遥控屏"，放右手边顺手）；
  * 右边顶到屏幕边缘就翻到左侧；两边都放不下时退回居中 ——
  * 宁可盖住一点别的，也不能跑到屏幕外。 */
+let placingWindows=false;
 function placePanel() {
+  if(placingWindows)return;
   if (!panelWin || panelWin.isDestroyed() || !win || win.isDestroyed()) return;
   const b = win.getBounds();
   const area = screen.getDisplayMatching(b).workArea;
@@ -455,7 +461,14 @@ function placePanel() {
    * 用当前 bounds 会让"改档位"这一步自相矛盾：窗口尺寸与算位置用的输入是
    * 同一份旧值，结果是档位换了、位置却按旧尺寸算 —— 差出去正好一个面板宽度，
    * 面板会看着像没挪窝，也可能压到屏幕外。档位是唯一真相。 */
-  panelWin.setBounds(panelBounds(b, panelBox(state.panelSize), area));
+  placingWindows=true;
+  try {
+    const pair=pairedBounds(b,state.panelCustom||panelBox(state.panelSize),area);
+    if(JSON.stringify(b)!==JSON.stringify(pair.main))win.setBounds(pair.main);
+    win.webContents.setZoomFactor(zoomFor(pair.main.width));
+    const pb=panelWin.getBounds();
+    if(Object.keys(pair.panel).some(k=>pb[k]!==pair.panel[k]))panelWin.setBounds(pair.panel);
+  } finally { placingWindows=false; }
 }
 
 /* 打开观测面板。
@@ -491,7 +504,7 @@ function openPanel(key = 'overview') {
      * 它的三个注入里也**没有** TV_TRANSPARENT_CSS。 */
     backgroundColor: '#050a15',
     hasShadow: false,
-    resizable: false,
+    resizable: true,
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
@@ -524,6 +537,7 @@ function openPanel(key = 'overview') {
     panelWin.webContents.insertCSS(PANEL_READABLE_CSS).catch(() => {});
   });
   panelWin.once('ready-to-show', () => { if (panelWin) panelWin.show(); });
+  panelWin.on('resized', () => {if(placingWindows||!panelWin)return;const b=panelWin.getBounds();state.panelCustom={width:b.width,height:b.height};saveState();placePanel();});
   panelWin.on('closed', () => { panelWin = null; });
 
   /* 面板窗口也要有右键菜单（理由见 popupControlMenu）。
@@ -591,6 +605,7 @@ function applySize(key) {
 function applyPanelSize(key) {
   if (!PANEL_SIZES[key]) return;
   state.panelSize = key;
+  delete state.panelCustom;
   saveState();
   refreshTray();
   placePanel();
@@ -912,6 +927,13 @@ function registerSaveIPC() {
 /* 控制按钮与面板窗口之间的三条通道。
  * 按钮只喊一声"开"；面板那边负责报"用户点了什么"和"我关了"。 */
 function registerDockIPC() {
+  ipcMain.handle('tv:skin:get',(e)=>isTrustedWindowSender(e.sender,[win,panelWin])?(state.tvSkin||'neon'):'classic');
+  ipcMain.handle('tv:skin:set',(e,skin)=>{
+    if(!isTrustedWindowSender(e.sender,[win,panelWin])||!['classic','neon'].includes(skin))return state.tvSkin||'neon';
+    state.tvSkin=skin;saveState();
+    for(const w of [win,panelWin])if(w&&!w.isDestroyed())w.webContents.send('tv:skin:changed',skin);
+    return skin;
+  });
   ipcMain.on('tv:openPanel', (e, key) => {
     if (e.sender === win?.webContents) openPanel(key);
   });
@@ -1070,6 +1092,8 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     // 旧 dock 已移除，功能入口只通过主电视捕获后打开独立副屏。
     createTray();
+    screen.on('display-metrics-changed',placePanel);
+    screen.on('display-removed',placePanel);
   });
 
   // 托盘应用：关掉窗口不等于退出

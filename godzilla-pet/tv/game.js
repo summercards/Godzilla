@@ -36,7 +36,7 @@ const FX_LOCK_LEVEL=P.EPOCHS[1].min;
 const FX_SCALE_MAX=Growth.bodyScale(FX_LOCK_LEVEL,null,null,P.EPOCHS);
 const sentinelRenderer=new window.SentinelBoss.Renderer(Image);
 const harborArt=new Image();harborArt.src=ASSETS.LAB_ART.harbor;
-const harborLayers=Object.fromEntries(['far','mid','near'].map(key=>{const img=new Image();img.src=ASSETS.LAB_ART[key];return [key,img];}));
+const harborLayers=Object.fromEntries(['haze','far','mid','near'].map(key=>{const img=new Image();img.src=ASSETS.LAB_ART[key];return [key,img];}));
 const roadArt=new Image();roadArt.src=ASSETS.LAB_ART.road;
 let storageOK=true,raw=null;try{raw=JSON.parse(SAVEIO.getItem(SAVE)||'null');}catch{storageOK=false;}
 const pageSearch=window.location?.search||'';

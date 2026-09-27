@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {tiles,layers,draw}=require('../parallax.js');
 test('city parallax: ordered independent speeds and constant viewport coverage',()=>{
- assert.ok(layers[0].speed<layers[1].speed&&layers[1].speed<layers[2].speed&&layers[2].speed<1);
+ assert.ok(layers.every((layer,i)=>layer.speed<1&&(i===0||layers[i-1].speed<layer.speed)));
  for(const layer of layers)for(const camera of [-10000,0,1999.9,2000,1e9]){
   const list=tiles(camera,layer.speed,1000,1280);assert.ok(list.length<=3);assert.ok(list[0].x<=0);assert.ok(list.at(-1).x+1000>=1280);
   for(let i=1;i<list.length;i++){assert.equal(list[i].x-list[i-1].x,1000);assert.notEqual(list[i].flip,list[i-1].flip);}

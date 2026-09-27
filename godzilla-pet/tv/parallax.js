@@ -1,7 +1,7 @@
-/* Three reusable transparent city strips; no growing scene-object list. */
+/* Four reusable transparent city strips; no growing scene-object list. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.HarborParallax=api;})(typeof window!=='undefined'?window:globalThis,function(){
  'use strict';
- const layers=[{key:'far',speed:.18,height:470},{key:'mid',speed:.42,height:340},{key:'near',speed:.72,height:265}];
+ const layers=[{key:'haze',speed:.10,height:736,offset:340},{key:'far',speed:.18,height:555,offset:220},{key:'mid',speed:.42,height:365},{key:'near',speed:.72,height:265}];
  function tiles(camera,speed,width,viewport){
   const offset=((camera*speed)%(width*2)+width*2)%(width*2),first=Math.floor(offset/width),result=[];
   for(let i=first,x=i*width-offset;x<viewport;i++,x+=width)result.push({x,flip:i%2===1});
@@ -16,7 +16,13 @@
    const height=layer.height,width=Math.round(height*img.naturalWidth/img.naturalHeight);
    // Alternating forward/back tiles meet the identical source edge at every join.
    // Camera scale animates as the creature grows; it must not alter travel distance.
-   for(const tile of tiles(camera,layer.speed,width,w)){ctx.save();ctx.translate(tile.x+(tile.flip?width:0),baseline-height);ctx.scale(tile.flip?-1:1,1);ctx.drawImage(img,0,0,width,height+2);ctx.restore();}
+   for(const tile of tiles(camera+(layer.offset||0)/layer.speed,layer.speed,width,w)){ctx.save();ctx.translate(tile.x+(tile.flip?width:0),baseline-height);ctx.scale(tile.flip?-1:1,1);ctx.drawImage(img,0,0,width,height+2);ctx.restore();}
+   if(layer.key==='far'){
+    // Haze sits in front of the towers, behind the bridge and warehouses.
+    const top=Math.max(0,baseline-240),glow=ctx.createLinearGradient(0,top,0,baseline);
+    glow.addColorStop(0,'#b7d4ff00');glow.addColorStop(.55,'#a8c8fa18');glow.addColorStop(1,'#b6dbff70');
+    ctx.fillStyle=glow;ctx.fillRect(0,top,w,baseline-top);
+   }
   }
   ctx.restore();
  }

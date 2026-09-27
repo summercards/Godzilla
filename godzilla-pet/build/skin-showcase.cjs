@@ -1,0 +1,14 @@
+'use strict';
+const {app,BrowserWindow}=require('electron'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
+const profile=fs.mkdtempSync(path.join(os.tmpdir(),'kaiju-skin-'));app.setPath('userData',profile);
+require('../main.js');
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+app.whenReady().then(async()=>{await delay(2400);const main=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/tv/index.html'));assert.ok(main);await main.webContents.executeJavaScript("__tvHost.openPanel('settings')");await delay(1600);const panel=BrowserWindow.getAllWindows().find(w=>w!==main);assert.ok(panel);
+const run=(w,code)=>w.webContents.executeJavaScript(code);const skin=w=>run(w,'document.documentElement.dataset.tvSkin');
+await run(panel,"TVSkins.choose('classic')");await delay(150);assert.equal(await skin(main),'classic');assert.equal(await skin(panel),'classic');
+await run(panel,"TVSkins.choose('neon')");await delay(150);assert.equal(await skin(main),'neon');assert.equal(await run(panel,"__tvSkin.set('invalid-skin')"),'neon');assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'pet-window.json'))).tvSkin,'neon');
+main.webContents.reload();await delay(1800);assert.equal(await skin(main),'neon');
+const soundBefore=await run(main,"document.getElementById('sound').textContent");await run(main,"document.querySelector('.sound-dial').click()");assert.notEqual(await run(main,"document.getElementById('sound').textContent"),soundBefore);
+const channelBefore=await run(main,"document.getElementById('channel').hidden");await run(main,"document.querySelector('.skin-dial').click()");assert.notEqual(await run(main,"document.getElementById('channel').hidden"),channelBefore);
+const out=path.join(__dirname,'../../doc/lab-redesign');fs.writeFileSync(path.join(out,'skin-settings.png'),(await panel.webContents.capturePage()).toPNG());
+const fit=await run(main,"(()=>{const b=document.querySelector('.tv-cabinet').getBoundingClientRect();return {width:innerWidth,height:innerHeight,right:b.right,bottom:b.bottom,skin:document.documentElement.dataset.tvSkin}})()");assert.ok(fit.right<=fit.width&&fit.bottom<=fit.height);console.log(JSON.stringify({crossWindow:true,persistent:true,controls:true,fit}));app.quit();}).catch(e=>{console.error(e);app.exit(1)});
