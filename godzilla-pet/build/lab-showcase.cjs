@@ -12,7 +12,9 @@ app.whenReady().then(async()=>{
  await w.webContents.executeJavaScript('Promise.all([document.fonts.ready,...[...document.images].map(i=>i.decode().catch(()=>{}))]).then(()=>true)');
  await new Promise(r=>setTimeout(r,1000));
  for(const page of ['overview','assign','talent','evo','analysis','codex','nurture','settings']){
-  console.log(await w.webContents.executeJavaScript(`LabUI.show('${page}');JSON.stringify({page:document.getElementById('management').dataset.page,hidden:document.getElementById('labOverview').hidden,title:document.getElementById('panelTitle').textContent})`));await new Promise(r=>setTimeout(r,page==='overview'?6500:600));
+  console.log(await w.webContents.executeJavaScript(`LabUI.show('${page}');JSON.stringify({page:document.getElementById('management').dataset.page,hidden:document.getElementById('labOverview').hidden,title:document.getElementById('panelTitle').textContent})`));
+  if(page==='overview'){await new Promise(r=>setTimeout(r,1350));await w.webContents.executeJavaScript("document.getElementById('assignHologram').dataset.scanStart=String(performance.now()/1000-1.55);true");await new Promise(r=>setTimeout(r,200));fs.writeFileSync(path.join(out,'overview-scan.png'),(await w.webContents.capturePage()).toPNG());}
+  await new Promise(r=>setTimeout(r,page==='overview'?4950:600));
   fs.writeFileSync(path.join(out,page+'.png'),(await w.webContents.capturePage()).toPNG());
  }
  const checks=await w.webContents.executeJavaScript(`(()=>{LabUI.show('assign');return {viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth,nav:[...document.querySelectorAll('.lab-nav button')].map(b=>({name:b.textContent,visible:b.getBoundingClientRect().bottom<=innerHeight})),pages:document.querySelectorAll('.lab-nav button').length};})()`);

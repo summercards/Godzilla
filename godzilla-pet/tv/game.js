@@ -141,10 +141,11 @@ function bossIntroLead(){
  * BOSS_TTK_CAL 是与实测对齐的标定系数：上面算的是"理想站桩输出"，实际还有走位、
  * 被挡路建筑拖住、被 Boss 重拳打断（p.stagger 会冻住动作计时），打折之后才落地。
  * 改这里的公式、或改上面那些冷却/倍率，**必须重跑 _boss-ttk.cjs 重新标定**。 */
-const BOSS_HP_BASE=2200;   /* 双重身份：血量的下限，同时也是旧档迁移的换算基准（见 bossLegacyMax） */
-const BOSS_TTK_TARGET=60,BOSS_TTK_CAL=.5,BOSS_TTK={stomp:2.8/13.68,tail:2.2/16.65,beam:2.6/28};
+const BOSS_HP_BASE=2200;   /* 旧档迁移的换算基准（见 bossLegacyMax）—— 不再当下限,只服务存档迁移 */
+const BOSS_HP_FLOOR=220;   /* 血量的下限。2026-09-27 拆出：BOSS_HP_BASE 留守迁移语义，公式整体 ×10 后这个值防止新生期被公式意外压到一位数 */
+const BOSS_TTK_TARGET=600,BOSS_TTK_CAL=.5,BOSS_TTK={stomp:2.8/13.68,tail:2.2/16.65,beam:2.6/28};
 function bossRefDps(){return (economy.power()*(BOSS_TTK.stomp+BOSS_TTK.tail)+economy.atomic()*BOSS_TTK.beam)*BOSS_TTK_CAL;}
-function bossMaxHp(){return Math.max(BOSS_HP_BASE,Math.round(bossRefDps()*BOSS_TTK_TARGET));}
+function bossMaxHp(){return Math.max(BOSS_HP_FLOOR,Math.round(bossRefDps()*BOSS_TTK_TARGET));}
 /* 旧档迁移用的基准：改动前 Boss 血量是 `2200 × Ke(区) × (村庄 ×0.6)`。
  * 存档快照里只存了 hp、没存 max，所以回读时得靠它把"剩下的绝对血量"换算成比例，
  * 否则读一次旧档就会把血条当成满的。 */
@@ -975,23 +976,88 @@ function drawAssignHologram(c,rig,t){
   const typed=(str,index)=>str.slice(0,t?Math.max(0,Math.floor((cycle-index*.28)*25)):str.length);
   g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,w,h);g.imageSmoothingEnabled=false;
   g.fillStyle='#0b142b';g.fillRect(0,0,w,h);
-  if(harborArt.complete&&harborArt.naturalWidth){g.drawImage(harborArt,0,0,w,h);g.fillStyle='#0b142bdc';g.fillRect(0,0,w,h);}
+  if(terminal){
+    const field=g.createRadialGradient(w/2,h*.48,10,w/2,h*.48,w*.55);
+    field.addColorStop(0,'#17314b');field.addColorStop(.62,'#0c1c34');field.addColorStop(1,'#081427');
+    g.fillStyle=field;g.fillRect(0,0,w,h);
+  }else if(harborArt.complete&&harborArt.naturalWidth){g.drawImage(harborArt,0,0,w,h);g.fillStyle='#0b142bdc';g.fillRect(0,0,w,h);}
   g.strokeStyle='#263b54';g.lineWidth=1;
   for(let x=0;x<w;x+=24){g.beginPath();g.moveTo(x,0);g.lineTo(x,h);g.stroke();}
   for(let y=0;y<h;y+=24){g.beginPath();g.moveTo(0,y);g.lineTo(w,y);g.stroke();}
+  if(terminal&&t){
+    const centerX=w/2,centerY=h/2,phase=(cycle*42)%Math.max(w,h);
+    g.save();g.globalCompositeOperation='screen';
+    for(let ring=0;ring<5;ring++){
+      const radius=Math.max(8,Math.max(w,h)-((phase+ring*115)%Math.max(w,h)));
+      g.strokeStyle=`rgba(74,222,255,${.055+ring*.012})`;g.lineWidth=2;
+      g.strokeRect(centerX-radius/2,centerY-radius*.37,radius,radius*.74);
+    }
+    g.restore();
+  }
   const bs=Growth.bodyScale(data.level,data.talents,data.morph,P.EPOCHS),bounds=KaijuRig.BIND_BOUNDS;
   // Fit the actual current shape; physical scale remains explicit in the readout.
   const fit=Math.min(w*(terminal?.48:.64)/((bounds.x1-bounds.x0)*bs),h*.66/((bounds.y1-bounds.y0)*bs));
   const ax=w/2-(bounds.x0+bounds.x1)*bs*fit/2,ay=h*.85;
-  const pose=KaijuRig.pose({x:0,ground:0,moving:false,step:0,action:{name:t?'walk':'neutral',t:0}},t);
+  const walkFrame=terminal?Math.floor(t*8)%8:0;
+  const walkPhase=walkFrame*Math.PI/4;
+  const pose=KaijuRig.pose({x:0,ground:0,moving:terminal,step:walkPhase,action:{name:terminal?'walk':t?'walk':'neutral',t:0}},terminal?walkPhase:t);
   const sk=scaleRig(pose,bs,0,0);
   const decor=Appearance.decor({form:Appearance.FORMS[economy.epochIndex()],epoch:economy.epoch(),level:data.level,morph:data.morph,talents:data.talents,elementColor:elementColor(),beamColor:beamColor()});
   g.fillStyle='#203458';g.beginPath();g.ellipse(w/2,ay+7,w*.31,19,0,0,Math.PI*2);g.fill();
   g.strokeStyle='#6cdcff';g.lineWidth=2;g.stroke();g.lineWidth=1;
   if(rig.ready){
-    g.save();g.translate(ax,ay);g.scale(fit,fit);g.globalAlpha=.92;
-    g.filter='brightness(1.5) saturate(.7)';rig.draw(g,sk,0,bs);fins.draw(g,sk,0,bs,decor.spikes);g.filter='none';
-    drawHologramDecor(g,sk,bs,decor,t);g.restore();
+    const specimenKey=terminal?JSON.stringify([w,h,rig.parts.head.src,bs,data.morph,data.talents,decor.spikes.count]):'';
+    if(terminal&&drawAssignHologram.frameKey!==specimenKey){drawAssignHologram.frameKey=specimenKey;drawAssignHologram.frames=[];}
+    let frame=terminal?drawAssignHologram.frames[walkFrame]:null;
+    if(!frame){
+      const specimen=terminal?document.createElement('canvas'):(drawAssignHologram.specimen||(drawAssignHologram.specimen=document.createElement('canvas')));
+      if(specimen.width!==w||specimen.height!==h){specimen.width=w;specimen.height=h;}
+      const sg=specimen.getContext('2d');sg.setTransform(1,0,0,1,0,0);sg.clearRect(0,0,w,h);sg.imageSmoothingEnabled=false;
+      sg.save();sg.translate(ax,ay);sg.scale(fit,fit);
+      sg.filter='brightness(1.5) saturate(.7)';rig.draw(sg,sk,0,bs);fins.draw(sg,sk,0,bs,decor.spikes);sg.filter='none';
+      drawHologramDecor(sg,sk,bs,decor,terminal?walkPhase:t);sg.restore();
+      frame={specimen};
+      if(terminal){
+        const blue=frame.blue=document.createElement('canvas');
+        blue.width=w;blue.height=h;
+        const bg=blue.getContext('2d');bg.imageSmoothingEnabled=false;
+        bg.filter='grayscale(1) sepia(1) hue-rotate(150deg) saturate(5) brightness(1.75)';bg.drawImage(specimen,0,0);bg.filter='none';
+        for(const [name,color] of [['violet','#a449ff'],['red','#ff385e']]){
+          const tinted=frame[name]=document.createElement('canvas');
+          tinted.width=w;tinted.height=h;
+          const tg=tinted.getContext('2d');tg.imageSmoothingEnabled=false;
+          tg.drawImage(specimen,0,0);tg.globalCompositeOperation='source-in';
+          tg.fillStyle=color;tg.fillRect(0,0,w,h);tg.globalCompositeOperation='source-over';
+        }
+      }
+      if(terminal)drawAssignHologram.frames[walkFrame]=frame;
+    }
+    const {specimen}=frame;
+    if(terminal&&t){
+      const sweep=Math.min(1,cycle/3.4),scanY=h*sweep;
+      g.save();g.beginPath();g.rect(0,scanY,w,h-scanY);g.clip();g.globalAlpha=.9;g.drawImage(specimen,0,0);g.restore();
+      if(scanY>0){
+        g.save();g.beginPath();g.rect(0,0,w,scanY);g.clip();g.globalAlpha=.53;
+        g.drawImage(frame.blue,0,0);
+        g.globalCompositeOperation='screen';g.globalAlpha=.23;g.drawImage(specimen,0,0);g.restore();
+        const beam=g.createLinearGradient(0,scanY-18,0,scanY+6);beam.addColorStop(0,'#42d7ff00');beam.addColorStop(.7,'#71eaff73');beam.addColorStop(1,'#b7ffff00');g.fillStyle=beam;g.fillRect(0,scanY-18,w,24);
+      }
+    }else{g.globalAlpha=.92;g.drawImage(specimen,0,0);g.globalAlpha=1;}
+    if(terminal&&t){
+      const phase=cycle%7.6,interference=phase>1.35&&phase<1.82||phase>5.05&&phase<5.28;
+      if(interference){
+        g.save();g.globalCompositeOperation='screen';
+        const beat=Math.floor(t*15);
+        for(let i=0;i<7;i++){
+          const y=Math.floor(h*(.22+(i*.091+beat*.037)%.59)),slice=3+i%3*2;
+          const shifted=i%2?frame.violet:frame.red;
+          const dx=(i%2?1:-1)*(4+(beat+i*3)%7);
+          g.globalAlpha=i%3===0?.54:.32;
+          g.drawImage(shifted,0,y,w,slice,dx,y,w,slice);
+        }
+        g.restore();
+      }
+    }
   }
   // 只覆盖低透明度扫描线，不改变真实部件轮廓，也不做整屏闪烁。
   g.fillStyle='#80ffff0c';for(let y=0;y<h;y+=4)g.fillRect(0,y,w,1);
@@ -1003,24 +1069,41 @@ function drawAssignHologram(c,rig,t){
     {q:sk.foot,x:w-16,y:h*.72,name:'后肢 / 动能',value:'速度 '+Math.round(economy.speed()),side:-1}
   ];
   if(terminal){
-    labels[0].y=h*.19;labels[1].y=h*.43;labels[2].y=h*.19;labels[3].y=h*.43;
+    labels[0].y=h*.13;labels[1].y=h*.38;labels[2].y=h*.21;labels[3].y=h*.45;
     labels.push(
-      {q:sk.bones.torso,x:16,y:h*.67,name:'GROWTH / 成长经验',value:Math.floor(data.xp)+' / '+economy.nextXP(),side:1},
-      {q:sk.bones.tail_tip,x:16,y:h*.85,name:'GENOME / 基因档案',value:data.mutations.length+' 项变异记录',side:1},
-      {q:sk.bones.head,x:w-16,y:h*.67,name:'SECTOR / 区域记录',value:'区域 '+data.district+' · '+Math.floor(data.meters)+' m',side:-1},
-      {q:sk.bones.torso,x:w-16,y:h*.85,name:'COMBAT / 战斗记录',value:data.kills+' 击破 / '+data.cleared+' 破坏',side:-1}
+      {q:sk.bones.torso,x:16,y:h*.59,name:'GROWTH / 成长经验',value:Math.floor(data.xp)+' / '+economy.nextXP(),side:1},
+      {q:sk.bones.tail_tip,x:16,y:h*.77,name:'GENOME / 基因档案',value:data.mutations.length+' 项变异记录',side:1},
+      {q:sk.bones.head,x:w-16,y:h*.64,name:'SECTOR / 区域记录',value:'区域 '+data.district+' · '+Math.floor(data.meters)+' m',side:-1},
+      {q:sk.bones.torso,x:w-16,y:h*.79,name:'COMBAT / 战斗记录',value:data.kills+' 击破 / '+data.cleared+' 破坏',side:-1}
     );
   }
   g.font=(terminal?'14':'17')+'px Pixel, monospace';
-  labels.forEach((a,i)=>{ 
-    const x=ax+a.q.x*fit,y=ay+a.q.y*fit,edge=a.x+a.side*122;
-    if(i<4){g.strokeStyle='#68acb6';g.beginPath();g.moveTo(x,y);g.lineTo(edge,a.y+25);g.lineTo(a.x,a.y+25);g.stroke();
+  labels.forEach((a,i)=>{
+    // Independent, slow drift gives the floating readouts depth; the specimen stays fixed.
+    const floatX=terminal&&t?Math.sin(t*.46+i*.83)*7:0;
+    const floatY=terminal&&t?Math.cos(t*.38+i*1.07)*3:0;
+    const labelX=a.x+floatX,labelY=a.y+floatY;
+    const x=ax+a.q.x*fit,y=ay+a.q.y*fit,edge=labelX+a.side*122;
+    if(i<4){g.strokeStyle='#68acb6';g.beginPath();g.moveTo(x,y);g.lineTo(edge,labelY+25);g.lineTo(labelX,labelY+25);g.stroke();
     g.fillStyle='#a7f1ee';g.fillRect(x-2,y-2,4,4);}
     const box=terminal?174:133;g.font=(terminal?(i<4?'14':'12'):'17')+'px Pixel, monospace';
-    g.fillStyle='#0b142bee';g.fillRect(a.side===1?a.x-3:a.x-box+3,a.y-19,box,46);
-    g.textAlign=a.side===1?'left':'right';g.fillStyle='#dceaff';g.fillText(terminal?typed(a.name,i*2):a.name,a.x,a.y);g.fillStyle='#8fe7c4';g.fillText(terminal?typed(a.value,i*2+1):a.value,a.x,a.y+22);
+    if(!terminal){g.fillStyle='#0b142bee';g.fillRect(a.side===1?labelX-3:labelX-box+3,labelY-19,box,46);}
+    g.textAlign=a.side===1?'left':'right';g.fillStyle='#dceaff';g.fillText(terminal?typed(a.name,i*2):a.name,labelX,labelY);g.fillStyle='#8fe7c4';g.fillText(terminal?typed(a.value,i*2+1):a.value,labelX,labelY+22);
   });
   if(terminal){
+    const telemetry=[
+      ['STAGE / 阶段',economy.epoch().name],
+      ['ENERGY / 核能',String(Math.floor(data.energy))],
+      ['DNA / 基因',String(Math.floor(data.dna))],
+      ['TALENT / 天赋',String(data.talent)],
+      ['POINTS / 加点',String(data.assign)],
+      ['SKILLS / 技能',String(data.skills.length)]
+    ];
+    telemetry.forEach(([name,value],i)=>{
+      const x=w*(.36+(i%3)*.14),y=18+Math.floor(i/3)*28;
+      g.textAlign='center';g.font='10px Pixel, monospace';g.fillStyle='#70aaba';g.fillText(typed(name,i+7),x,y);
+      g.font='12px Pixel, monospace';g.fillStyle='#b4f4e8';g.fillText(typed(value,i+8),x,y+13);
+    });
     g.textAlign='left';g.font='11px Pixel, monospace';g.fillStyle='#72afbb';
     g.fillText(typed('BIO-SCAN // LIVE LINK · 生体数据持续同步',0),16,h-12);
     g.textAlign='right';g.fillText(cycle<5?'READING_':'SCAN COMPLETE · 待命',w-16,h-12);
@@ -1258,7 +1341,7 @@ for(let a of particles){a.life-=dt;a.x+=a.vx*dt;a.y+=a.vy*dt;a.vy+=a.gravity*dt;
 if(sceneSwitch){sceneSwitch.t+=dt;if(sceneSwitchDone(sceneSwitch.t))endSceneSwitch();}
 saveTimer+=wallDt;if(saveTimer>=5){saveTimer=0;save();}uiTimer+=wallDt;if(uiTimer>=.2){uiTimer=0;hud();}}
 buildUI();
-if(panelMode){openPanel('assign');hud();}
+if(panelMode){openPanel('overview');hud();}
 else{generateWorld(data.world);broadcast('巨兽观测恢复 · '+chapterLocation(),'累计行程 '+Math.floor(data.meters)+' m · 现场镜头持续跟踪',true);catchUp(Date.now());save();hud();}
 if(!panelMode){
   document.addEventListener('pointerdown',()=>{if(!muted)audioInit();},{once:true});
@@ -1325,6 +1408,6 @@ window.__growth={
 try{window.__tvBridge?.register(window.__growth);}catch{}
 if(panelMode&&!window.__panelHost){
   try{if(window.opener?.__growth)window.__growth.sync(window.opener.__growth.snapshot());}catch{}
-  openPanel(new URLSearchParams(pageSearch).get('tab')||'assign');
+  openPanel(new URLSearchParams(pageSearch).get('tab')||'overview');
 }
 })();

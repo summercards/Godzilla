@@ -41,7 +41,7 @@ const talentDetail=document.createElement('aside');talentDetail.className='lab-c
 const talentReset=$('talentReset');
 P.TALENT_NODES.forEach((n,i)=>{const art=$('talent-'+n.id).querySelector('svg');art.classList.add('has-art');art.style.backgroundImage='var(--lab-talent_icons)';art.style.backgroundSize='600% 300%';art.style.backgroundPosition=(i%6)*20+'% '+Math.floor(i/6)*50+'%';art.style.backgroundRepeat='no-repeat';});
 const talentSpecimen=document.createElement('div');talentSpecimen.className='talent-specimen';hero.prepend(talentSpecimen);
-let page='overview',pending={},last='',applying=false,selectedTalent='spines';
+let page='',pending={},last='',applying=false,selectedTalent='spines';
 const snapshot=()=>JSON.parse(window.__growth.snapshot());
 const stats=e=>({power:Math.round(e.power()),atomic:Math.round(e.atomic()),metabolism:e.passive().toFixed(1)+'/秒',stride:Math.round(e.speed())});
 const send=(id)=>{if(window.__panelHost)window.__panelHost.command({id});else if(window.opener?.__growth)window.opener.__growth.command({id});};

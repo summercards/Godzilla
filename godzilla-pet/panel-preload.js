@@ -16,7 +16,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const KEY = 'gnn-kaiju-idle-v3';
 const boot = ipcRenderer.sendSync('panel:boot');
 let mem = boot?.payload || null;
-let selected = boot?.key || 'assign';
+let selected = boot?.key || 'overview';
 
 /* 画面上报的面板模式标记。画面靠它决定走"全屏观测面板"那一套初始化
  * （tv/game.js 顶部读 window.__panelMode）。原语也能经桥暴露。 */
