@@ -442,7 +442,7 @@ function buildWindow() {
 let panelWin = null;
 
 let panelKey = 'overview';
-const PANEL_KEYS = new Set(['overview', 'assign', 'talent', 'evo', 'stats', 'skills', 'news', 'settings']);
+const PANEL_KEYS = new Set(['overview', 'assign', 'talent', 'evo', 'stats', 'analysis', 'skills', 'news', 'settings']);
 
 /* 把面板窗口摆在电视窗口旁边，跟它成对。
  *

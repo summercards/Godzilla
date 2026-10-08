@@ -982,3 +982,107 @@ test('版面：机位条贴屏幕最上沿，且纵向位置只有一个真源',
 });
 
 test('双窗口：不同工作区同时可见且不重叠',()=>{const {pairedBounds}=require('../tv-config.js');for(const area of [{x:0,y:25,width:1440,height:800},{x:-1280,y:0,width:1280,height:720},{x:0,y:0,width:1920,height:1080},{x:0,y:0,width:1024,height:768}]){const p=pairedBounds({x:1200,y:700,width:600,height:394},{width:900,height:660},area);for(const b of Object.values(p)){assert.ok(b.x>=area.x&&b.y>=area.y);assert.ok(b.x+b.width<=area.x+area.width&&b.y+b.height<=area.y+area.height);}assert.ok(p.main.x+p.main.width<p.panel.x);}});
+
+/* ------------------------------------------------------------------ *
+ * 研究所界面重构（2026-10-08）
+ *
+ * 「技能树」从天赋页拆出来单独成「技能」页，原「分析」页的成长分析搬到
+ * 「加点」页。三件事都靠 lab.js 在运行时搭 DOM —— 静态读代码很容易以为
+ * 它们还在原位（毕竟 skillsPanel 依旧躺在 index.html 的 talentPanel 里），
+ * 所以逐条钉住落点，而不是钉住"代码里出现过某个字符串"。
+ * ------------------------------------------------------------------ */
+test('研究所界面：技能树独立成「技能」页，成长分析落到「加点」页', () => {
+  const h = fs.readFileSync(path.join(ROOT, 'tv', 'lab.js'), 'utf8');
+
+  // 技能树是**同一个 DOM 节点被搬走**，不是复制一份：复制会让两页各有一棵，
+  // 选中态与锁定态会在两处不一致 —— 而两边看起来都正常。
+  assert.match(h, /const talentSkills=\$\('talentPanel'\)\.querySelector\('\.talent-skills'\)/,
+    '找不到从天赋页取出技能树的那一步');
+  assert.match(h, /skillPage\.append\(talentSkills\)/,
+    '技能树没有挂到新的「技能」页，而是留在了天赋页');
+  assert.match(h, /talentSkills\.querySelector\('\.module-heading span'\)\.textContent='技能树'/,
+    '技能树的标题还是"技能学习模块"，没有跟着搬到「技能」页');
+  assert.match(h, /skillPage\.hidden=key!=='analysis'/,
+    '「技能」页的显隐没有跟着 analysis 这个 key 走');
+
+  // 成长分析：原来在 analysis 页的 extra 里现场生成，现在挂在加点页的独立卡片上。
+  // 旧路径若还在（又生成一份），同一件事就有两个渲染出口。
+  assert.match(h, /\$\('assignPanel'\)\.append\(assignAnalysis\)/, '成长分析卡没有挂到加点页');
+  assert.match(h, /assignAnalysis\.innerHTML=/, '成长分析卡没有内容生成');
+  assert.ok(!h.includes("if(page==='analysis')extra.innerHTML"),
+    '旧的「analysis 页里生成成长分析」那条路径还在 —— 会和加点页那张卡重复');
+  assert.ok(h.includes("extra.hidden=!['codex','nurture'].includes(key)"),
+    'extra 页的显隐清单没有收窄到 codex / nurture');
+
+  // 总览那张「详细分析 ››」：内容已搬去加点页，按钮就得跟着指过去，
+  // 否则点开是一页叫「技能研究」的东西，和按钮文案对不上。
+  assert.match(h, /data-page="assign">详细分析/, '总览的「详细分析」按钮还指着技能页');
+  assert.match(h, /analysis:'技能研究'/, 'analysis 页的标题不再是「技能研究」');
+});
+
+test('研究所界面：导航图标不许重复', () => {
+  const h = fs.readFileSync(path.join(ROOT, 'tv', 'lab.js'), 'utf8');
+  const pages = h.match(/const pages=\[(.*?)\];/s);
+  assert.ok(pages, '找不到导航页签定义');
+  const entries = [...pages[1].matchAll(/\['(\w+)','([^']+)','(\w+)'\]/g)]
+    .map((m) => ({ key: m[1], label: m[2], icon: m[3] }));
+  assert.equal(entries.length, 8, `导航页签数量应为 8，实际 ${entries.length}`);
+
+  const icons = entries.map((e) => e.icon);
+  const dup = icons.filter((x, i) => icons.indexOf(x) !== i);
+  assert.deepEqual(dup, [],
+    `有页签共用了同一个图标 ${JSON.stringify(dup)} —— 空心轮廓图标一旦重复，导航就分不出谁是谁`);
+
+  const analysis = entries.find((e) => e.key === 'analysis');
+  assert.equal(analysis.label, '技能', '「技能」页的标签不对');
+  // 图标必须在 symbols 表里有定义：icon() 对未定义的 key 会**静默回落成 star**，
+  // 也就是与「天赋」撞图，而两处都不报错。
+  assert.ok(new RegExp(`${analysis.icon}:'`).test(h),
+    `页签图标 ${analysis.icon} 在 symbols 里没有定义，icon() 会静默回落到 star`);
+});
+
+/* 技能树那两列曾经写在 flex 容器上：声明语法正确、测试全绿，实际一个像素
+ * 都不动（.skill-tree 的基础规则是 display:flex）。这正是本项目最怕的一类错
+ * —— 写了、以为在生效、实际算不着。所以这条不只断言"列数写了两列"，
+ * 而是钉住它旁边必须有 display:grid。 */
+test('技能树两列必须真的生效：display:grid + 窄档回单列', () => {
+  const lab = fs.readFileSync(path.join(ROOT, 'tv', 'lab.css'), 'utf8');
+  const rule = lab.match(/\.panel-view \.lab-skills-page \.skill-tree\{([^}]*)\}/);
+  assert.ok(rule, '找不到技能页技能树的规则块');
+  assert.match(rule[1], /display:grid/, '技能树是 flex 容器，grid-template-columns 是死值 —— 必须显式 display:grid');
+  assert.match(rule[1], /grid-template-columns:1fr 1fr/, '两列声明不见了');
+
+  // 基础规则确实是 flex —— 这句写进断言里，免得被"顺手清理"掉之后
+  // display:grid 也跟着被误删，两列又悄悄塌回单列。
+  const base = fs.readFileSync(path.join(ROOT, 'tv', 'style.css'), 'utf8').match(/\.skill-tree\{([^}]*)\}/);
+  assert.ok(base, '找不到 .skill-tree 的基础规则');
+  assert.match(base[1], /display:flex/, '.skill-tree 基础规则不再是 flex —— 请同步复核 display:grid 这条覆盖是否还必要');
+
+  assert.match(lab, /@media\(max-width:880px\)\{\.panel-view \.lab-skills-page \.skill-tree\{grid-template-columns:1fr\}\}/,
+    '窄档（紧凑面板 720px）没有退回单列，节点会被压到 150px 以下');
+
+  // 列数只能有一个真源：两列 + 窄档回单列，正好两条。
+  // 第三条通常意味着有人又加了一条永远算不过的声明。
+  const decls = [...lab.matchAll(/\.panel-view[^{}]*\.skill-tree\{([^}]*)\}/g)]
+    .filter((m) => /grid-template-columns/.test(m[1]));
+  assert.equal(decls.length, 2,
+    `给 .skill-tree 写列数的规则应有 2 处（两列 + 窄档回单列），实际 ${decls.length} —— 列数只能有一个真源`);
+});
+
+test('面板「技能」页的 analysis key 在两侧白名单里贯通', () => {
+  const game = readGame();
+  assert.match(game, /const panelKeys=\[[^\]]*'analysis'[^\]]*\]/,
+    'game.js 的 panelKeys 少了 analysis —— 面板侧判定不过会静默挡掉这一页');
+  assert.match(game, /if\(key==='skills'\)key='analysis'/,
+    '电视侧点旧「技能」入口没有改道到 analysis');
+  assert.match(readMain(), /PANEL_KEYS = new Set\(\[[^\]]*'analysis'[^\]]*\]\)/,
+    'main.js 的 PANEL_KEYS 少了 analysis —— 电视传来的打开请求会被丢掉，回落 overview');
+});
+
+test('研究所卡片保留右下折角装饰', () => {
+  const lab = fs.readFileSync(path.join(ROOT, 'tv', 'lab.css'), 'utf8');
+  const rule = lab.match(/\.panel-view \.lab-card:after\{([^}]*)\}/);
+  assert.ok(rule, '卡片折角（.lab-card:after）不见了 —— 它夹在一次大段替换里被删过一次');
+  assert.match(rule[1], /border-right:3px solid #8c92a7/);
+  assert.match(rule[1], /pointer-events:none/, '折角必须吃不到指针事件，否则会盖住卡片右下角的按钮');
+});

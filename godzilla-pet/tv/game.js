@@ -46,7 +46,7 @@ let skeleton=new KaijuRig.Skeleton(growthParts()),skinKey=economy.epochIndex()+'
 const fins=new KaijuRig.FinRenderer();let skinRequest=0;
 function syncGrowthSkin(){const key=economy.epochIndex()+':'+(data.morph.hue||'');if(key===skinKey)return;skinKey=key;const request=++skinRequest,next=new KaijuRig.Skeleton(growthParts());next.loaded.then(()=>{if(request!==skinRequest)return;if(next.ready)skeleton=next;else console.error('成长皮肤加载失败',next.failures);});}
 let browserPanel=null;
-const panelKeys=['overview','assign','talent','evo','stats','skills','news','settings'];
+const panelKeys=['overview','assign','talent','evo','stats','analysis','skills','news','settings'];
 function requestPanel(key){
   if(window.__tvHost)return window.__tvHost.openPanel(key);
   if(!browserPanel||browserPanel.closed){
@@ -358,7 +358,7 @@ function refreshTicker(){pendingTicker=`GNN 24H 特别报道　◆　${chapterLo
 function commitTicker(){if(pendingTicker){$('tickerText').textContent=pendingTicker;$('tickerCopy').textContent=pendingTicker;pendingTicker='';}tickerWidth=$('tickerText').offsetWidth||1200;}
 function scrollNews(dt){tickerOffset+=dt*48;if(tickerOffset>=tickerWidth){tickerOffset-=tickerWidth;commitTicker();}$('tickerTrack').style.transform='translateX(-'+Math.floor(tickerOffset)+'px)';headlineOffset+=dt*24;if(headlineOffset>headlineWidth+36)headlineOffset=-headlineViewport;$('headline').style.transform='translateX('+Math.floor(headlineOffset<0?-headlineOffset:-Math.max(0,headlineOffset-36))+'px)';}
 function openPanel(key,opener){
-  if(key==='skills')key='talent';
+  if(key==='skills')key='analysis';
   if(!panelKeys.includes(key))return;
   if(!panelMode){$('management').hidden=true;requestPanel(key);return;}
   panelOpener=opener||panelOpener;$('management').hidden=false;
@@ -947,25 +947,27 @@ function buildAssignCards(){
   for(let k in P.STATS){$('assign-'+k).onclick=()=>{if(economy.assignPoint(k)){notice(P.STATS[k].name+' 已加点');save();hud();renderGrowthPanels();}else notice('没有可用加点机会或已满级');};$('buy-'+k).onclick=()=>{if(economy.upgrade(k)){notice(P.STATS[k].name+' 已强化');save();hud();renderGrowthPanels();}else notice('核能不足或已满级');};}
 }
 
-/* 面板使用独立骨骼实例和低频时钟；不触碰直播姿态、战斗时钟或存档。 */
+/* Keep the independent panel clock display-synced; rasterized poses are reused. */
 function syncAssignHologram(){
   if(!panelMode)return;
   const c=$('assignHologram');
-  const state=syncAssignHologram.state||(syncAssignHologram.state={timer:null,key:'',rig:null,revision:0,lastDraw:''});
-  if(document.hidden||$('management').hidden||!c.getClientRects().length){clearTimeout(state.timer);state.timer=null;return;}
+  const state=syncAssignHologram.state||(syncAssignHologram.state={timer:null,key:'',rig:null,revision:0,lastDraw:'',lastTime:-Infinity});
+  if(document.hidden||$('management').hidden||!c.getClientRects().length){cancelAnimationFrame(state.timer);state.timer=null;state.lastTime=-Infinity;return;}
   if(state.timer!==null)return;
-  const tick=()=>{
+  const tick=(now=performance.now())=>{
     state.timer=null;
-    if(document.hidden||$('management').hidden||!c.getClientRects().length)return;
+    if(document.hidden||$('management').hidden||!c.getClientRects().length){state.lastTime=-Infinity;return;}
     const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches===true;
+    if(now-state.lastTime<(reduced?1000:1000/30)-1){state.timer=requestAnimationFrame(tick);return;}
+    state.lastTime=now;
     const key=economy.epochIndex()+':'+(data.morph.hue||'');
     if(key!==state.key||!state.rig){
       state.key=key;state.rig=new KaijuRig.Skeleton(Appearance.toParts(KaijuRig.RIG,Appearance.skinFor('godzilla',economy.epochIndex(),data.morph),'godzilla'));
       const rig=state.rig;rig.loaded.then(()=>{if(state.rig===rig){state.revision++;syncAssignHologram();}});
     }
-    const signature=JSON.stringify([data.level,data.levels,data.talents,data.morph,data.district,data.skills,state.revision,c.width,c.height]);
-    if(!reduced||signature!==state.lastDraw){drawAssignHologram(c,state.rig,reduced?0:performance.now()/1000);state.lastDraw=signature;}
-    state.timer=setTimeout(tick,reduced?1000:125);
+    const signature=JSON.stringify([data.level,data.levels,data.talents,data.morph,data.district,data.skills,state.revision,c.width,c.height,$('management').dataset.page]);
+    if(!reduced||signature!==state.lastDraw){drawAssignHologram(c,state.rig,reduced?0:now/1000);state.lastDraw=signature;}
+    state.timer=requestAnimationFrame(tick);
   };
   tick();
 }
@@ -998,15 +1000,15 @@ function drawAssignHologram(c,rig,t){
   // Fit the actual current shape; physical scale remains explicit in the readout.
   const fit=Math.min(w*(terminal?.48:.64)/((bounds.x1-bounds.x0)*bs),h*.66/((bounds.y1-bounds.y0)*bs));
   const ax=w/2-(bounds.x0+bounds.x1)*bs*fit/2,ay=h*.85;
-  const walkFrame=terminal?Math.floor(t*8)%8:0;
-  const walkPhase=walkFrame*Math.PI/4;
+  const walkFrame=terminal?Math.floor(t*24)%24:0;
+  const walkPhase=walkFrame*Math.PI/12;
   const pose=KaijuRig.pose({x:0,ground:0,moving:terminal,step:walkPhase,action:{name:terminal?'walk':t?'walk':'neutral',t:0}},terminal?walkPhase:t);
   const sk=scaleRig(pose,bs,0,0);
   const decor=Appearance.decor({form:Appearance.FORMS[economy.epochIndex()],epoch:economy.epoch(),level:data.level,morph:data.morph,talents:data.talents,elementColor:elementColor(),beamColor:beamColor()});
   g.fillStyle='#203458';g.beginPath();g.ellipse(w/2,ay+7,w*.31,19,0,0,Math.PI*2);g.fill();
   g.strokeStyle='#6cdcff';g.lineWidth=2;g.stroke();g.lineWidth=1;
   if(rig.ready){
-    const specimenKey=terminal?JSON.stringify([w,h,rig.parts.head.src,bs,data.morph,data.talents,decor.spikes.count]):'';
+    const specimenKey=terminal?JSON.stringify([w,h,rig.parts.head.src,bs,decor,syncAssignHologram.state?.revision||0]):'';
     if(terminal&&drawAssignHologram.frameKey!==specimenKey){drawAssignHologram.frameKey=specimenKey;drawAssignHologram.frames=[];}
     let frame=terminal?drawAssignHologram.frames[walkFrame]:null;
     if(!frame){
@@ -1014,7 +1016,12 @@ function drawAssignHologram(c,rig,t){
       if(specimen.width!==w||specimen.height!==h){specimen.width=w;specimen.height=h;}
       const sg=specimen.getContext('2d');sg.setTransform(1,0,0,1,0,0);sg.clearRect(0,0,w,h);sg.imageSmoothingEnabled=false;
       sg.save();sg.translate(ax,ay);sg.scale(fit,fit);
-      sg.filter='brightness(1.5) saturate(.7)';rig.draw(sg,sk,0,bs);fins.draw(sg,sk,0,bs,decor.spikes);sg.filter='none';
+      rig.draw(sg,sk,0,bs);fins.draw(sg,sk,0,bs,decor.spikes);
+      // Filter the assembled body once, not every seam patch and bone draw.
+      sg.restore();sg.filter='brightness(1.5) saturate(.7)';
+      sg.globalCompositeOperation='copy';sg.drawImage(specimen,0,0);
+      sg.globalCompositeOperation='source-over';sg.filter='none';
+      sg.save();sg.translate(ax,ay);sg.scale(fit,fit);
       drawHologramDecor(sg,sk,bs,decor,terminal?walkPhase:t);sg.restore();
       frame={specimen};
       if(terminal){
@@ -1351,7 +1358,7 @@ if(!panelMode){
 }else{
   document.documentElement.classList.add('panel-view');
   document.addEventListener('visibilitychange',syncAssignHologram);
-  window.addEventListener('pagehide',()=>{clearTimeout(syncAssignHologram.state?.timer);});
+  window.addEventListener('pagehide',()=>{cancelAnimationFrame(syncAssignHologram.state?.timer);});
   window.matchMedia?.('(prefers-reduced-motion: reduce)').addEventListener('change',()=>{if(syncAssignHologram.state)syncAssignHologram.state.lastDraw='';syncAssignHologram();});
   fins.loaded.then(()=>{if(syncAssignHologram.state)syncAssignHologram.state.revision++;syncAssignHologram();});
   document.addEventListener('click',e=>{
